@@ -1,0 +1,56 @@
+{
+  "format_version": "1.2",
+  "resource_drift": [
+    {
+      "address": "module.network.aws_security_group.web",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "name": "web",
+          "cidr_blocks": ["1.2.3.4/32"]
+        },
+        "after": {
+          "name": "web",
+          "cidr_blocks": ["4.5.6.7/32"]
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "variables": {
+        "office_cidrs": {
+          "description": "office egress CIDRs"
+        }
+      },
+      "module_calls": {
+        "network": {
+          "source": "./modules/network",
+          "expressions": {
+            "allowed_cidrs": { "references": ["var.office_cidrs"] }
+          },
+          "module": {
+            "resources": [
+              {
+                "address": "aws_security_group.web",
+                "mode": "managed",
+                "type": "aws_security_group",
+                "name": "web",
+                "expressions": {
+                  "name": { "constant_value": "web" },
+                  "cidr_blocks": { "references": ["var.allowed_cidrs"] }
+                }
+              }
+            ],
+            "variables": {
+              "allowed_cidrs": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

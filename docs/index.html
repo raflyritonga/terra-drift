@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>terra-drift — docs</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1f2328; --muted: #656d76; --border: #d0d7de;
+    --code-bg: #f6f8fa; --accent: #0969da; --accent-bg: #ddf4ff;
+    --sidebar-bg: #f6f8fa; --warn-bg: #fff8c5; --warn-border: #d4a72c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --border: #30363d;
+      --code-bg: #161b22; --accent: #4493f8; --accent-bg: #121d2f;
+      --sidebar-bg: #0d1117; --warn-bg: #2d2611; --warn-border: #9e6a03;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  .wrap { display: flex; max-width: 1200px; margin: 0 auto; }
+  nav {
+    position: sticky; top: 0; align-self: flex-start; height: 100vh; overflow-y: auto;
+    width: 240px; flex: none; padding: 24px 16px; background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
+  }
+  nav h1 { font-size: 18px; margin: 0 0 4px; }
+  nav .tag { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  nav a { display: block; color: var(--fg); text-decoration: none; padding: 4px 8px; border-radius: 6px; font-size: 14px; }
+  nav a:hover { background: var(--accent-bg); }
+  main { flex: 1; min-width: 0; padding: 32px 40px 120px; }
+  h2 { font-size: 24px; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  h2:first-of-type { border-top: none; margin-top: 0; }
+  h3 { font-size: 18px; margin: 28px 0 8px; }
+  p, li { color: var(--fg); }
+  a { color: var(--accent); }
+  code { background: var(--code-bg); padding: 2px 6px; border-radius: 5px; font-size: 85%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  pre { position: relative; background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; font-size: 13.5px; line-height: 1.5; }
+  .copy { position: absolute; top: 8px; right: 8px; background: var(--bg); border: 1px solid var(--border); color: var(--muted); border-radius: 6px; font-size: 12px; padding: 3px 8px; cursor: pointer; }
+  .copy:hover { color: var(--fg); }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .note { background: var(--accent-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 6px; padding: 10px 14px; margin: 14px 0; }
+  .warn { background: var(--warn-bg); border: 1px solid var(--warn-border); border-radius: 6px; padding: 10px 14px; margin: 14px 0; }
+  .tabs { display: flex; gap: 4px; margin: 16px 0 0; flex-wrap: wrap; }
+  .tabs button { background: var(--code-bg); border: 1px solid var(--border); color: var(--fg); padding: 6px 14px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 14px; }
+  .tabs button.active { background: var(--accent-bg); border-bottom-color: var(--accent-bg); font-weight: 600; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .muted { color: var(--muted); }
+  kbd { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 85%; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <h1>Terra Drift</h1>
+  <div class="tag">docs</div>
+  <a href="#overview">Overview</a>
+  <a href="#how">How it works</a>
+  <a href="#install">Install</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#server">Host the server</a>
+  <a href="#client">Host the client</a>
+  <a href="#secrets">Secrets</a>
+  <a href="#config">Config reference</a>
+  <a href="#ci">CI setup</a>
+  <a href="#decision">The decision</a>
+  <a href="#commands">Commands</a>
+  <a href="#tiers">Tiers &amp; safety</a>
+</nav>
+<main>
+
+<h2 id="overview">Overview</h2>
+<p>Someone changes infrastructure by hand in the AWS console. Terraform's code doesn't know, and the next <code>apply</code> quietly reverts it. terra-drift detects that drift, shows a short report, and asks you which side to trust: the <strong>code</strong> or the <strong>live infrastructure</strong>. Only if you choose "live" does it edit the Terraform to match reality and open a pull request.</p>
+<p>It does not scan your cloud account, run its own AWS calls, or decide for you. Detection is delegated to <code>terraform plan -refresh-only</code>; the decision is yours.</p>
+
+<h2 id="how">How it works</h2>
+<pre><code>terra-drift sync
+  1. detect   terraform plan -refresh-only        (no cloud scanner)
+  2. report   one short line per drifted resource
+  3. ask      trust code, live, or partial?
+                terminal -> prompt you
+                CI       -> print report, exit 2 unless --trust is passed
+  4. act
+       code    -> change nothing (next apply reverts the live drift)
+       live    -> rewrite code to match reality -> open a PR
+       partial -> choose per resource; the rest stay code</code></pre>
+<p>The choice happens <strong>before</strong> any file changes. Choosing "live" is what triggers the edit + PR; you still review that PR before merge.</p>
+
+<h2 id="install">Install</h2>
+<p>Two binaries, built from one repo. Go 1.24+.</p>
+<pre><code># build both
+go build -o terra-drift     ./cmd/terra-drift
+go build -o terra-drift-mcp ./cmd/terra-drift-mcp
+
+# or install straight from source
+go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+go install github.com/raflyritonga/terra-drift/cmd/terra-drift-mcp@latest</code></pre>
+
+<h2 id="architecture">Architecture</h2>
+<table>
+  <tr><th>Binary</th><th>What it does</th><th>Runs on</th></tr>
+  <tr><td><code>terra-drift</code></td><td>the client: detects drift, edits code, opens PRs</td><td>your CI runner (or a laptop)</td></tr>
+  <tr><td><code>terra-drift-mcp</code></td><td>the server: talks to your model, returns structured edits</td><td>its own box, as an HTTP service</td></tr>
+</table>
+<p>The client only calls the server for the hard cases (tier 2 — see <a href="#tiers">tiers</a>). Simple drift is edited by the client alone, no model involved.</p>
+<p>The git host (Bitbucket, GitHub, GitLab) is reached over its REST API. The runner does <strong>not</strong> need to be hosted by it — a self-hosted Jenkins runner opening PRs against Bitbucket Cloud is fine. The runner needs push access to the repo and an API token.</p>
+
+<h2 id="server">Host the server</h2>
+<p><code>terra-drift-mcp</code> is one static binary. Put it on a machine that can (a) reach your model endpoint and (b) be reached by your CI runners on its listen port. It needs <strong>no</strong> AWS, Terraform, git, or repo access — only the model API key.</p>
+
+<h3>Run it</h3>
+<pre><code>TERRA_DRIFT_MCP_TRANSPORT=http \
+TERRA_DRIFT_MCP_LISTEN=:8080 \
+TERRA_DRIFT_MCP_MODEL_PROVIDER=openai-compatible \
+TERRA_DRIFT_MCP_MODEL_ID=acme-model \
+TERRA_DRIFT_MCP_MODEL_BASE_URL=https://x.llm.com/v1 \
+LLM_API_KEY=sk-... \
+terra-drift-mcp</code></pre>
+<p>The model is any OpenAI-compatible chat endpoint (a hosted model like <code>x.llm.com</code>, a gateway, or Ollama). The client POSTs to <code>&lt;base_url&gt;/chat/completions</code> with a bearer token. Set <code>TERRA_DRIFT_MCP_MODEL_PROVIDER=mock</code> to run with canned edits and no key for testing.</p>
+
+<h3>As a systemd service</h3>
+<pre><code>[Unit]
+Description=terra-drift MCP server
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/terra-drift-mcp
+EnvironmentFile=/etc/terra-drift/terra-drift-mcp.env
+User=terra-drift
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+<p>with <code>/etc/terra-drift/terra-drift-mcp.env</code> (<code>chmod 600</code>, owned by the <code>terra-drift</code> user):</p>
+<pre><code>TERRA_DRIFT_MCP_TRANSPORT=http
+TERRA_DRIFT_MCP_LISTEN=:8080
+TERRA_DRIFT_MCP_MODEL_PROVIDER=openai-compatible
+TERRA_DRIFT_MCP_MODEL_ID=acme-model
+TERRA_DRIFT_MCP_MODEL_BASE_URL=https://x.llm.com/v1
+LLM_API_KEY=sk-...</code></pre>
+<div class="warn"><strong>Lock down the port.</strong> There is no built-in auth yet. Allow the listen port only from your CI runner IPs (security group / firewall), and put TLS in front if the traffic crosses an untrusted network.</div>
+
+<h2 id="client">Host the client</h2>
+<p><code>terra-drift</code> runs wherever your <code>terraform plan</code> runs — a CI runner, usually. It needs:</p>
+<ul>
+  <li><code>terraform</code> on <code>PATH</code> and an initialized Terraform root (<code>terraform init</code> already run)</li>
+  <li>AWS credentials that can run a plan (reuse your existing plan role; nothing extra)</li>
+  <li>network access to the MCP server's URL</li>
+  <li>git push access to the repo and a PR API token (see <a href="#secrets">secrets</a>)</li>
+</ul>
+<p>Drop a <code>.terra-drift.yaml</code> in the Terraform root (committed — it holds no secrets) and run <code>terra-drift sync</code>. Full config in <a href="#config">config reference</a>.</p>
+<p>Check the environment before the first run:</p>
+<pre><code>terra-drift doctor --dir envs/prod</code></pre>
+
+<h2 id="secrets">Secrets</h2>
+<p>Three kinds of secret, three homes. None of them belong in the committed config file or in git.</p>
+<table>
+  <tr><th>Secret</th><th>Used by</th><th>Lives on</th><th>Given as</th></tr>
+  <tr><td>Model API key</td><td>server</td><td>the server box only</td><td><code>LLM_API_KEY</code> env (600 file or the box's secret manager)</td></tr>
+  <tr><td>PR API token</td><td>client</td><td>CI runner</td><td>provider env var (below), from your CI secret store</td></tr>
+  <tr><td>git push credential</td><td>client</td><td>CI runner</td><td>HTTPS app password or SSH key in the checkout's remote</td></tr>
+  <tr><td>AWS credentials</td><td>client</td><td>CI runner</td><td>OIDC / assumed role (avoid long-lived keys)</td></tr>
+</table>
+
+<h3>PR API token per provider</h3>
+<pre><code># Bitbucket (default provider)
+BITBUCKET_USERNAME=ci-bot
+BITBUCKET_APP_PASSWORD=...      # scopes: pull-request:write, repository:write
+# or a single token:
+BITBUCKET_TOKEN=...
+
+# GitHub
+GH_TOKEN=...                    # or GITHUB_TOKEN (the Actions built-in works)
+
+# GitLab
+GITLAB_TOKEN=...                # scope: api</code></pre>
+
+<h3>Rules of thumb</h3>
+<ul>
+  <li>The model key stays on the server box. The client and the CI runner never see it, and it is never sent over the wire to the client.</li>
+  <li>Runner secrets come from the CI's own secret store (GitHub Actions secrets, GitLab masked/protected variables, Bitbucket secured repository variables, Jenkins credentials) and are injected as env at run time — never written into the repo.</li>
+  <li>For HTTPS push, the same Bitbucket app password / token usually covers both the push and the PR call. For SSH push, use a deploy key with write access.</li>
+  <li>Prefer short-lived AWS credentials (OIDC) over static keys.</li>
+</ul>
+
+<h2 id="config">Config reference</h2>
+<h3>Client — <code>.terra-drift.yaml</code> (in the Terraform root, committed)</h3>
+<pre><code>protected_paths: ["modules/**"]   # never edit these when a caller-settable value exists
+
+mcp:
+  transport: http                            # http (server on its own box) | stdio (local subprocess)
+  url: http://mcp.internal.example.com:8080  # http transport
+  server_bin: terra-drift-mcp                # stdio transport only
+  tool: propose_hcl_edits
+  max_retries: 2
+
+git:
+  branch_prefix: drift-sync/
+  open_pr: true
+  provider: bitbucket        # bitbucket (default) | github | gitlab
+  workspace: acme            # bitbucket workspace / github owner / gitlab group
+  repo: infra
+  target_branch: main
+  # api_base: ""             # self-hosted: Bitbucket Server, GitLab CE, GH Enterprise</code></pre>
+
+<h3>Server — <code>terra-drift-mcp.yaml</code> (or the env vars shown above)</h3>
+<pre><code>transport: http
+listen: ":8080"
+model:
+  provider: openai-compatible    # openai-compatible | mock
+  id: acme-model
+  base_url: https://x.llm.com/v1
+# the API key is env only (LLM_API_KEY) — never in this file</code></pre>
+
+<h2 id="ci">CI setup</h2>
+<p>Two moments: a <strong>scheduled</strong> job that detects drift and prints the report (changes nothing), and an <strong>on-demand</strong> run where a human passes their decision with <code>--trust</code>. Optionally, a <strong>pre-apply gate</strong> that fails a deploy while drift is unresolved.</p>
+<p>Set these on the runner (values from your secret store): the model URL <code>TERRA_DRIFT_MCP_URL</code>, AWS creds, and the PR token for your provider. Replace <code>envs/prod</code> and <code>acme/infra</code>.</p>
+
+<div class="tabs">
+  <button class="active" data-tab="gh">GitHub Actions</button>
+  <button data-tab="gl">GitLab CI</button>
+  <button data-tab="bb">Bitbucket</button>
+  <button data-tab="jk">Jenkins</button>
+</div>
+
+<div class="panel active" id="gh">
+<p class="muted">.github/workflows/drift.yml — schedule detects; "Run workflow" with a trust input acts.</p>
+<pre><code>name: drift
+on:
+  schedule: [{ cron: "0 6 * * *" }]
+  workflow_dispatch:
+    inputs:
+      trust: { type: choice, options: [report-only, code, live, partial], default: report-only }
+      live:  { description: "partial: comma-separated addresses", default: "" }
+permissions: { contents: write, pull-requests: write }
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with: { role-to-assume: "${{ vars.PLAN_ROLE_ARN }}", aws-region: "${{ vars.AWS_REGION }}" }
+      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - run: go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+      - name: configure client
+        run: |
+          cat > envs/prod/.terra-drift.yaml << EOF
+          mcp: { transport: http, url: ${{ vars.TERRA_DRIFT_MCP_URL }} }
+          git:
+            provider: github
+            workspace: ${{ github.repository_owner }}
+            repo: ${{ github.event.repository.name }}
+            target_branch: ${{ github.event.repository.default_branch }}
+          EOF
+      - run: terraform -chdir=envs/prod init
+      - name: detect (schedule / report-only)
+        if: github.event_name == 'schedule' || inputs.trust == 'report-only'
+        run: terra-drift check --dir envs/prod
+      - name: act (manual with a decision)
+        if: github.event_name == 'workflow_dispatch' && inputs.trust != 'report-only'
+        run: terra-drift sync --dir envs/prod --trust ${{ inputs.trust }} --live "${{ inputs.live }}"
+        env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }</code></pre>
+</div>
+
+<div class="panel" id="gl">
+<p class="muted">.gitlab-ci.yml — scheduled pipeline reports; run manually with TRUST=live to act.</p>
+<pre><code>variables:
+  TRUST: "report-only"
+drift:
+  image: golang:1.24
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip git
+    - curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.0/terraform_1.9.0_linux_amd64.zip
+    - unzip -q tf.zip -d /usr/local/bin
+    - go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+  script:
+    - |
+      cat > envs/prod/.terra-drift.yaml << EOF
+      mcp: { transport: http, url: ${TERRA_DRIFT_MCP_URL} }
+      git: { provider: gitlab, workspace: acme, repo: infra, target_branch: main }
+      EOF
+    - terraform -chdir=envs/prod init
+    - |
+      if [ "$TRUST" = "report-only" ]; then
+        terra-drift check --dir envs/prod
+      else
+        terra-drift sync --dir envs/prod --trust "$TRUST"
+      fi</code></pre>
+<p class="muted">Needs <code>GITLAB_TOKEN</code> (api scope) as a masked CI variable.</p>
+</div>
+
+<div class="panel" id="bb">
+<p class="muted">bitbucket-pipelines.yml — attach a Schedule to drift-detect; run drift-decide manually with TRUST.</p>
+<pre><code>image: golang:1.24
+pipelines:
+  custom:
+    drift-detect:                # attach a daily Schedule
+      - step:
+          name: detect and report
+          script: &amp;setup
+            - apt-get update -qq && apt-get install -y -qq unzip
+            - curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.0/terraform_1.9.0_linux_amd64.zip
+            - unzip -q tf.zip -d /usr/local/bin
+            - go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+            - export PATH=$PATH:$(go env GOPATH)/bin
+            - terraform -chdir=envs/prod init
+            - terra-drift check --dir envs/prod
+    drift-decide:                # Run pipeline with TRUST=live|code|partial
+      - variables: [{ name: TRUST }, { name: LIVE }]
+      - step:
+          name: act on decision
+          script:
+            - apt-get update -qq && apt-get install -y -qq unzip
+            - curl -sLo tf.zip https://releases.hashicorp.com/terraform/1.9.0/terraform_1.9.0_linux_amd64.zip
+            - unzip -q tf.zip -d /usr/local/bin
+            - go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+            - export PATH=$PATH:$(go env GOPATH)/bin
+            - |
+              cat > envs/prod/.terra-drift.yaml << EOF
+              mcp: { transport: http, url: ${TERRA_DRIFT_MCP_URL} }
+              git: { provider: bitbucket, workspace: ${BITBUCKET_WORKSPACE}, repo: ${BITBUCKET_REPO_SLUG}, target_branch: main }
+              EOF
+            - terraform -chdir=envs/prod init
+            - terra-drift sync --dir envs/prod --trust "${TRUST}" --live "${LIVE}"</code></pre>
+<p class="muted">Set <code>BITBUCKET_USERNAME</code> + <code>BITBUCKET_APP_PASSWORD</code> as secured repository variables.</p>
+</div>
+
+<div class="panel" id="jk">
+<p class="muted">Jenkinsfile — self-hosted runner, repo on Bitbucket Cloud. Scheduled build reports; build with TRUST=live to act.</p>
+<pre><code>pipeline {
+  agent any
+  triggers { cron('H 6 * * *') }
+  parameters {
+    choice(name: 'TRUST', choices: ['report-only','code','live','partial'])
+    string(name: 'LIVE', defaultValue: '')
+  }
+  environment {
+    BITBUCKET_APP_PW       = credentials('bitbucket-app-pw')  // username+password credential
+    BITBUCKET_USERNAME     = "${env.BITBUCKET_APP_PW_USR}"
+    BITBUCKET_APP_PASSWORD = "${env.BITBUCKET_APP_PW_PSW}"
+  }
+  stages {
+    stage('run') {
+      steps {
+        sh 'go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest'
+        sh 'terraform -chdir=envs/prod init'
+        sh '''
+          export PATH=$PATH:$(go env GOPATH)/bin
+          if [ "$TRUST" = "report-only" ]; then
+            terra-drift check --dir envs/prod
+          else
+            terra-drift sync --dir envs/prod --trust "$TRUST" --live "$LIVE"
+          fi
+        '''
+      }
+    }
+  }
+}</code></pre>
+<p class="muted">The checkout's <code>origin</code> must have push access (credentialed clone or SSH key).</p>
+</div>
+
+<h3>Pre-apply gate (optional)</h3>
+<p>Before <code>terraform apply</code> in your deploy pipeline, add one read-only step. Exit 2 means drift exists, which fails the step and blocks the deploy until it's resolved.</p>
+<pre><code>terra-drift check --dir envs/prod   # exit 0 clean / 2 drift / 1 error</code></pre>
+
+<h2 id="decision">The decision</h2>
+<p>When drift is found terra-drift asks whose version to trust. In a terminal it prompts; in CI you pass <code>--trust</code>.</p>
+<table>
+  <tr><th>Choice</th><th>What happens</th></tr>
+  <tr><td><code>code</code></td><td>Change nothing. The next <code>terraform apply</code> reverts the live drift (normal Terraform behavior).</td></tr>
+  <tr><td><code>live</code></td><td>Rewrite the code to match reality, then open a PR for a final review.</td></tr>
+  <tr><td><code>partial</code></td><td>Trust live for named resources only (<code>--live addr,addr</code>, or per-resource prompt); the rest stay code.</td></tr>
+</table>
+<p>The report itself is deliberately small — one line per drifted resource, not a <code>terraform plan</code> diff:</p>
+<pre><code>drift on 1 resource(s):
+  module.network.aws_security_group.web       cidr_blocks</code></pre>
+
+<h2 id="commands">Commands</h2>
+<pre><code>terra-drift doctor   # preflight: terraform, git, config, server reachable, PR provider
+terra-drift check    # detect + report; exit 0 clean / 2 drift / 1 error
+terra-drift sync     # detect -> report -> ask -> act
+terra-drift sync --trust live                         # trust reality: rewrite + PR
+terra-drift sync --trust code                         # trust code: no changes
+terra-drift sync --trust partial --live aws_x.y       # trust reality for named resources</code></pre>
+
+<h2 id="tiers">Tiers &amp; safety</h2>
+<p>A drifted value often isn't a literal in the resource block — it flows through variables, module arguments, tfvars. terra-drift edits where the value <em>originates</em>.</p>
+<table>
+  <tr><th>Tier</th><th>Meaning</th><th>Who edits</th></tr>
+  <tr><td>0</td><td>literal in the resource block</td><td>client, no model</td></tr>
+  <tr><td>1</td><td>passes through vars / module args to a literal</td><td>client, no model</td></tr>
+  <tr><td>2</td><td>transforming expression (concat, template, for_each)</td><td>server proposes, client applies</td></tr>
+  <tr><td>3</td><td>opaque (data sources, other resources, registry modules)</td><td>left to you, noted in the PR</td></tr>
+</table>
+<p>Safety rules, enforced by the client regardless of what the server proposes:</p>
+<ul>
+  <li>Never edit under <code>protected_paths</code> (default <code>modules/**</code>) when the value is settable from a caller.</li>
+  <li>The model never writes files — it returns structured edits; the client writes them.</li>
+  <li>Not done until a re-plan is clean; tier-2 retries against the residual up to <code>max_retries</code>.</li>
+  <li>All writes go on a fresh branch, one commit per change, through a PR.</li>
+</ul>
+
+</main>
+</div>
+<script>
+  document.querySelectorAll('pre').forEach(function (pre) {
+    var b = document.createElement('button');
+    b.className = 'copy'; b.textContent = 'copy';
+    b.onclick = function () {
+      navigator.clipboard.writeText(pre.querySelector('code').innerText);
+      b.textContent = 'copied'; setTimeout(function () { b.textContent = 'copy'; }, 1200);
+    };
+    pre.appendChild(b);
+  });
+  document.querySelectorAll('.tabs button').forEach(function (btn) {
+    btn.onclick = function () {
+      var tab = btn.dataset.tab;
+      document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.toggle('active', x === btn); });
+      document.querySelectorAll('.panel').forEach(function (p) { p.classList.toggle('active', p.id === tab); });
+    };
+  });
+</script>
+</body>
+</html>

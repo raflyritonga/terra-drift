@@ -1,0 +1,38 @@
+{
+  "format_version": "1.2",
+  "resource_drift": [
+    {
+      "address": "aws_security_group.web",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "name": "web",
+          "description": "managed by terraform"
+        },
+        "after": {
+          "name": "web",
+          "description": "hotfix: widened for the on-call incident"
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_security_group.web",
+          "mode": "managed",
+          "type": "aws_security_group",
+          "name": "web",
+          "expressions": {
+            "name": { "constant_value": "web" },
+            "description": { "constant_value": "managed by terraform" }
+          }
+        }
+      ]
+    }
+  }
+}

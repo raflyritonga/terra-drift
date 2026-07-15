@@ -1,0 +1,43 @@
+{
+  "format_version": "1.2",
+  "resource_drift": [
+    {
+      "address": "aws_security_group.web",
+      "mode": "managed",
+      "type": "aws_security_group",
+      "name": "web",
+      "change": {
+        "actions": ["update"],
+        "before": {
+          "name": "web",
+          "cidr_blocks": ["10.0.0.0/8"]
+        },
+        "after": {
+          "name": "web",
+          "cidr_blocks": ["10.0.0.0/8", "1.2.3.4/32"]
+        }
+      }
+    }
+  ],
+  "configuration": {
+    "root_module": {
+      "resources": [
+        {
+          "address": "aws_security_group.web",
+          "mode": "managed",
+          "type": "aws_security_group",
+          "name": "web",
+          "expressions": {
+            "name": { "constant_value": "web" },
+            "cidr_blocks": { "references": ["var.allowed_cidrs"] }
+          }
+        }
+      ],
+      "variables": {
+        "allowed_cidrs": {
+          "description": "CIDRs allowed to reach the web tier"
+        }
+      }
+    }
+  }
+}
