@@ -95,14 +95,29 @@
 <p>The choice happens <strong>before</strong> any file changes. Choosing "live" is what triggers the edit + PR; you still review that PR before merge.</p>
 
 <h2 id="install">Install</h2>
-<p>Two binaries, built from one repo. Go 1.24+.</p>
-<pre><code># build both
-go build -o terra-drift     ./cmd/terra-drift
-go build -o terra-drift-mcp ./cmd/terra-drift-mcp
+<p>Two binaries, built from one repo. Pick one of three ways.</p>
 
-# or install straight from source
-go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+<h3>1. Download a prebuilt release</h3>
+<p>Grab the archive for your OS/arch from the <a href="https://github.com/raflyritonga/terra-drift/releases">Releases page</a>. Each archive contains both binaries.</p>
+<pre><code># example: Linux x86-64
+curl -sSL -o terra-drift.tar.gz \
+  https://github.com/raflyritonga/terra-drift/releases/latest/download/terra-drift_VERSION_linux_amd64.tar.gz
+tar -xzf terra-drift.tar.gz
+sudo install terra-drift_*/terra-drift terra-drift_*/terra-drift-mcp /usr/local/bin/</code></pre>
+<p class="muted">Each archive ships a <code>.sha256</code> next to it; verify with <code>sha256sum -c</code>.</p>
+
+<h3>2. Install from source (Go 1.24+)</h3>
+<pre><code>go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
 go install github.com/raflyritonga/terra-drift/cmd/terra-drift-mcp@latest</code></pre>
+
+<h3>3. Build locally</h3>
+<pre><code>go build -o terra-drift     ./cmd/terra-drift
+go build -o terra-drift-mcp ./cmd/terra-drift-mcp</code></pre>
+
+<h3>Cutting a release (maintainers)</h3>
+<p>Pushing a version tag builds all platforms and publishes a GitHub Release automatically (<code>.github/workflows/release.yml</code>).</p>
+<pre><code>git tag v0.1.0
+git push origin v0.1.0</code></pre>
 
 <h2 id="architecture">Architecture</h2>
 <table>
@@ -116,17 +131,38 @@ go install github.com/raflyritonga/terra-drift/cmd/terra-drift-mcp@latest</code>
 <h2 id="server">Host the server</h2>
 <p><code>terra-drift-mcp</code> is one static binary. Put it on a machine that can (a) reach your model endpoint and (b) be reached by your CI runners on its listen port. It needs <strong>no</strong> AWS, Terraform, git, or repo access — only the model API key.</p>
 
+<h3>Pick a model</h3>
+<p>The model is a swap of two settings — provider and base_url. Nothing else in the tool changes.</p>
+<table>
+  <tr><th>provider</th><th>Works with</th><th>base_url example</th><th>key env</th></tr>
+  <tr><td><code>openai</code></td><td>OpenAI and any OpenAI-compatible endpoint — gateways, Ollama, vLLM, Together, Groq, x.llm.com</td><td><code>https://api.openai.com/v1</code></td><td><code>LLM_API_KEY</code> / <code>OPENAI_API_KEY</code></td></tr>
+  <tr><td><code>anthropic</code></td><td>Claude (native Messages API)</td><td><code>https://api.anthropic.com</code></td><td><code>LLM_API_KEY</code> / <code>ANTHROPIC_API_KEY</code></td></tr>
+  <tr><td><code>mock</code></td><td>testing — canned edits, no network, no key</td><td>—</td><td>—</td></tr>
+</table>
+<p class="muted">The <code>openai</code> provider POSTs to <code>&lt;base_url&gt;/chat/completions</code>; <code>anthropic</code> POSTs to <code>&lt;base_url&gt;/v1/messages</code>. To use your own <code>x.llm.com</code>, set <code>provider: openai</code> and <code>base_url: https://x.llm.com/v1</code>.</p>
+
 <h3>Run it</h3>
 <pre><code>TERRA_DRIFT_MCP_TRANSPORT=http \
 TERRA_DRIFT_MCP_LISTEN=:8080 \
-TERRA_DRIFT_MCP_MODEL_PROVIDER=openai-compatible \
-TERRA_DRIFT_MCP_MODEL_ID=acme-model \
-TERRA_DRIFT_MCP_MODEL_BASE_URL=https://x.llm.com/v1 \
+TERRA_DRIFT_MCP_MODEL_PROVIDER=openai \
+TERRA_DRIFT_MCP_MODEL_ID=gpt-4o-mini \
+TERRA_DRIFT_MCP_MODEL_BASE_URL=https://api.openai.com/v1 \
 LLM_API_KEY=sk-... \
 terra-drift-mcp</code></pre>
-<p>The model is any OpenAI-compatible chat endpoint (a hosted model like <code>x.llm.com</code>, a gateway, or Ollama). The client POSTs to <code>&lt;base_url&gt;/chat/completions</code> with a bearer token. Set <code>TERRA_DRIFT_MCP_MODEL_PROVIDER=mock</code> to run with canned edits and no key for testing.</p>
+<p>Set <code>TERRA_DRIFT_MCP_MODEL_PROVIDER=mock</code> to run with canned edits and no key for testing.</p>
 
-<h3>As a systemd service</h3>
+<h3>As a systemd service (baseline: env file)</h3>
+<p>The simplest way. Put the config and key in one file, read as <code>chmod 600</code>. The key is plaintext on disk, so file permissions are the defense — good enough on a box only you control.</p>
+<pre><code>sudo install -d -m 700 /etc/terra-drift
+sudo install -m 600 /dev/stdin /etc/terra-drift/terra-drift-mcp.env << 'EOF'
+TERRA_DRIFT_MCP_TRANSPORT=http
+TERRA_DRIFT_MCP_LISTEN=:8080
+TERRA_DRIFT_MCP_MODEL_PROVIDER=openai
+TERRA_DRIFT_MCP_MODEL_ID=gpt-4o-mini
+TERRA_DRIFT_MCP_MODEL_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-...
+EOF</code></pre>
+<p>Unit — <code>/etc/systemd/system/terra-drift-mcp.service</code>:</p>
 <pre><code>[Unit]
 Description=terra-drift MCP server
 After=network.target
@@ -134,7 +170,7 @@ After=network.target
 [Service]
 ExecStart=/usr/local/bin/terra-drift-mcp
 EnvironmentFile=/etc/terra-drift/terra-drift-mcp.env
-User=terra-drift
+DynamicUser=yes
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
@@ -142,13 +178,46 @@ ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target</code></pre>
-<p>with <code>/etc/terra-drift/terra-drift-mcp.env</code> (<code>chmod 600</code>, owned by the <code>terra-drift</code> user):</p>
-<pre><code>TERRA_DRIFT_MCP_TRANSPORT=http
-TERRA_DRIFT_MCP_LISTEN=:8080
-TERRA_DRIFT_MCP_MODEL_PROVIDER=openai-compatible
-TERRA_DRIFT_MCP_MODEL_ID=acme-model
-TERRA_DRIFT_MCP_MODEL_BASE_URL=https://x.llm.com/v1
-LLM_API_KEY=sk-...</code></pre>
+<pre><code>sudo systemctl daemon-reload && sudo systemctl enable --now terra-drift-mcp</code></pre>
+
+<h3>Harden further (optional): encrypted credential</h3>
+<p>If you want the key encrypted at rest and out of the environment, use systemd credentials (v250+) instead of putting the key in the env file. Encrypt once (host-bound — useless if copied elsewhere):</p>
+<pre><code>printf %s 'sk-...' | sudo systemd-creds encrypt --name=llm_api_key - /etc/terra-drift/llm_api_key.cred</code></pre>
+<p>Drop <code>LLM_API_KEY</code> from the env file, and add to the unit's <code>[Service]</code>:</p>
+<pre><code>LoadCredentialEncrypted=llm_api_key:/etc/terra-drift/llm_api_key.cred
+Environment=LLM_API_KEY_FILE=%d/llm_api_key</code></pre>
+<p><code>%d</code> is systemd's credentials directory; the server reads the key from that file and it never appears in <code>systemctl show</code> or <code>/proc/&lt;pid&gt;/environ</code>.</p>
+
+<h3>With Docker</h3>
+<p>The repo ships a <code>Dockerfile</code> that builds a small server image (distroless, nonroot, HTTPS-ready).</p>
+<pre><code>docker build -t terra-drift-mcp .</code></pre>
+<p><strong>Baseline — env file:</strong></p>
+<pre><code>docker run -d --name terra-drift-mcp -p 8080:8080 \
+  --env-file terra-drift-mcp.env \
+  terra-drift-mcp</code></pre>
+<p><strong>Keep the key out of the env — mount it as a file</strong> (works with the same <code>_FILE</code> support systemd uses):</p>
+<pre><code>docker run -d --name terra-drift-mcp -p 8080:8080 \
+  --env-file terra-drift-mcp.env \
+  -e LLM_API_KEY= \
+  -e LLM_API_KEY_FILE=/run/secrets/llm_api_key \
+  -v /etc/terra-drift/llm_api_key:/run/secrets/llm_api_key:ro \
+  terra-drift-mcp</code></pre>
+<p><strong>docker compose</strong> with a managed secret (mounted at <code>/run/secrets/&lt;name&gt;</code>):</p>
+<pre><code>services:
+  mcp:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      TERRA_DRIFT_MCP_TRANSPORT: http
+      TERRA_DRIFT_MCP_MODEL_PROVIDER: anthropic
+      TERRA_DRIFT_MCP_MODEL_ID: claude-opus-4-8
+      TERRA_DRIFT_MCP_MODEL_BASE_URL: https://api.anthropic.com
+      LLM_API_KEY_FILE: /run/secrets/llm_api_key
+    secrets: [llm_api_key]
+secrets:
+  llm_api_key:
+    file: ./llm_api_key.txt   # gitignored; or use an external secret</code></pre>
+
 <div class="warn"><strong>Lock down the port.</strong> There is no built-in auth yet. Allow the listen port only from your CI runner IPs (security group / firewall), and put TLS in front if the traffic crosses an untrusted network.</div>
 
 <h2 id="client">Host the client</h2>
@@ -186,6 +255,15 @@ GH_TOKEN=...                    # or GITHUB_TOKEN (the Actions built-in works)
 # GitLab
 GITLAB_TOKEN=...                # scope: api</code></pre>
 
+<h3>Storing the model key on the server</h3>
+<p>The server reads the key from <code>LLM_API_KEY</code> (or the provider-specific <code>OPENAI_API_KEY</code> / <code>ANTHROPIC_API_KEY</code>), or — if that's unset — from the file named by the same name plus <code>_FILE</code>. Options, baseline first:</p>
+<ol>
+  <li><strong>Env file (baseline)</strong> — <code>EnvironmentFile=</code> (or <code>--env-file</code> for Docker) with <code>chmod 600</code> file, <code>chmod 700</code> dir. Plaintext on disk; permissions are the guard. Fine on a box only you control.</li>
+  <li><strong>Mounted secret file</strong> — set <code>LLM_API_KEY_FILE</code> to a path and mount the key there (systemd credentials, Docker/compose secrets, a k8s secret). Keeps the key out of the environment.</li>
+  <li><strong>systemd encrypted credential</strong> — <code>LoadCredentialEncrypted=</code> + <code>LLM_API_KEY_FILE=%d/llm_api_key</code>. Also encrypted at rest and host-bound. See <a href="#server">Host the server</a>.</li>
+</ol>
+<p>Any of these beats <code>Environment=KEY=...</code> in the unit file — that leaks into <code>systemctl show</code> and anyone who can read the unit.</p>
+
 <h3>Rules of thumb</h3>
 <ul>
   <li>The model key stays on the server box. The client and the CI runner never see it, and it is never sent over the wire to the client.</li>
@@ -218,10 +296,10 @@ git:
 <pre><code>transport: http
 listen: ":8080"
 model:
-  provider: openai-compatible    # openai-compatible | mock
-  id: acme-model
-  base_url: https://x.llm.com/v1
-# the API key is env only (LLM_API_KEY) — never in this file</code></pre>
+  provider: openai         # openai | anthropic | mock
+  id: gpt-4o-mini          # or claude-opus-4-8, or your model name
+  base_url: https://api.openai.com/v1   # or https://x.llm.com/v1, https://api.anthropic.com
+# the API key is never in this file — from LLM_API_KEY, or LLM_API_KEY_FILE (see Secrets)</code></pre>
 
 <h2 id="ci">CI setup</h2>
 <p>Two moments: a <strong>scheduled</strong> job that detects drift and prints the report (changes nothing), and an <strong>on-demand</strong> run where a human passes their decision with <code>--trust</code>. Optionally, a <strong>pre-apply gate</strong> that fails a deploy while drift is unresolved.</p>

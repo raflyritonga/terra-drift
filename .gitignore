@@ -1,2 +1,14 @@
 terra-drift-PLAN.md
 .claude
+
+# built binaries and release artifacts
+/terra-drift
+/terra-drift-mcp
+/dist/
+*.tar.gz
+*.tar.gz.sha256
+
+# secrets — never commit
+*.env
+*.cred
+llm_api_key*

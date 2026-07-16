@@ -1,0 +1,68 @@
+name: release
+
+# Fires when you push a version tag, e.g.  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -e
+          ext=""
+          if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
+          name="terra-drift_${VERSION}_${GOOS}_${GOARCH}"
+          mkdir -p "$name"
+          flags="-s -w -X main.version=${VERSION}"
+          go build -trimpath -ldflags "$flags" -o "$name/terra-drift$ext"     ./cmd/terra-drift
+          go build -trimpath -ldflags "$flags" -o "$name/terra-drift-mcp$ext" ./cmd/terra-drift-mcp
+          cp README.md "$name/"
+          tar -czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            *.tar.gz
+            *.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: create github release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.tar.gz dist/*.sha256 \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
