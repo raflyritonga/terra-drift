@@ -10,19 +10,30 @@ import (
 )
 
 type Config struct {
-	Transport string      `yaml:"transport"` // stdio (Model A) | http (Model B)
-	Listen    string      `yaml:"listen"`    // Model B only
-	Model     ModelConfig `yaml:"model"`
+	Transport string       `yaml:"transport"` // stdio | http
+	Listen    string       `yaml:"listen"`    // http only
+	Model     ModelConfig  `yaml:"model"`
+	Secret    SecretConfig `yaml:"secret"`
 }
 
 type ModelConfig struct {
-	Provider string `yaml:"provider"` // phase 1: mock
+	Provider string `yaml:"provider"` // openai | anthropic | mock
 	ID       string `yaml:"id"`
 	BaseURL  string `yaml:"base_url"`
 }
 
+type SecretConfig struct {
+	Source string `yaml:"source"` // env (default) | aws-secrets-manager
+	Ref    string `yaml:"ref"`    // secret id/ARN, for a secret manager
+}
+
 func Default() Config {
-	return Config{Transport: "stdio", Listen: ":8080", Model: ModelConfig{Provider: "mock"}}
+	return Config{
+		Transport: "stdio",
+		Listen:    ":8080",
+		Model:     ModelConfig{Provider: "mock"},
+		Secret:    SecretConfig{Source: "env"},
+	}
 }
 
 // Load reads the optional yaml file, then lets env vars override.
@@ -51,6 +62,12 @@ func Load(path string) (Config, error) {
 	}
 	if v := os.Getenv("TERRA_DRIFT_MCP_MODEL_BASE_URL"); v != "" {
 		cfg.Model.BaseURL = v
+	}
+	if v := os.Getenv("TERRA_DRIFT_MCP_SECRET_SOURCE"); v != "" {
+		cfg.Secret.Source = v
+	}
+	if v := os.Getenv("TERRA_DRIFT_MCP_SECRET_REF"); v != "" {
+		cfg.Secret.Ref = v
 	}
 	if cfg.Transport != "stdio" && cfg.Transport != "http" {
 		return cfg, fmt.Errorf("transport must be stdio or http, got %q", cfg.Transport)

@@ -6,17 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/raflyritonga/terra-drift/internal/model"
 )
 
-// The openai-compatible client must send a chat request and return the reply text.
+// The openai client sends a chat request with the given key and returns the reply.
 func TestOpenAICompatibleComplete(t *testing.T) {
-	t.Setenv("LLM_API_KEY", "sk-test")
-
 	var gotAuth, gotModel string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
@@ -30,7 +26,7 @@ func TestOpenAICompatibleComplete(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := model.New("openai-compatible", "acme-model", srv.URL)
+	m, err := model.New("openai", "acme-model", srv.URL, "sk-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,47 +46,19 @@ func TestOpenAICompatibleComplete(t *testing.T) {
 }
 
 func TestOpenAICompatibleNeedsBaseURL(t *testing.T) {
-	if _, err := model.New("openai-compatible", "m", ""); err == nil {
+	if _, err := model.New("openai", "m", "", "k"); err == nil {
 		t.Fatal("expected error without base_url")
 	}
 }
 
-// The key can come from a file (systemd credentials / mounted secret), not just env.
-func TestOpenAICompatibleKeyFromFile(t *testing.T) {
-	keyFile := filepath.Join(t.TempDir(), "llm_api_key")
-	os.WriteFile(keyFile, []byte("sk-from-file\n"), 0o600)
-	t.Setenv("LLM_API_KEY", "")
-	t.Setenv("LLM_API_KEY_FILE", keyFile)
-
-	var gotAuth string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		io.WriteString(w, `{"choices":[{"message":{"content":"{}"}}]}`)
-	}))
-	defer srv.Close()
-
-	m, err := model.New("openai-compatible", "acme-model", srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.Complete(context.Background(), "s", "u"); err != nil {
-		t.Fatal(err)
-	}
-	if gotAuth != "Bearer sk-from-file" {
-		t.Fatalf("auth = %q, want key read from file (trimmed)", gotAuth)
-	}
-}
-
 func TestUnknownModelProvider(t *testing.T) {
-	if _, err := model.New("magic", "", ""); err == nil {
+	if _, err := model.New("magic", "", "", ""); err == nil {
 		t.Fatal("expected error for unknown provider")
 	}
 }
 
 // The anthropic provider speaks Claude's native Messages API.
 func TestAnthropicComplete(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-ant")
-
 	var gotKey, gotVer, gotSystem string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotKey = r.Header.Get("x-api-key")
@@ -108,7 +76,7 @@ func TestAnthropicComplete(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	m, err := model.New("anthropic", "claude-opus-4-8", srv.URL)
+	m, err := model.New("anthropic", "claude-opus-4-8", srv.URL, "sk-ant")
 	if err != nil {
 		t.Fatal(err)
 	}
