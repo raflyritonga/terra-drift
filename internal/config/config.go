@@ -18,7 +18,7 @@ type Config struct {
 }
 
 type MCP struct {
-	Transport  string `yaml:"transport"` // stdio (Model A, default) | http (Model B)
+	Transport  string `yaml:"transport"`
 	ServerBin  string `yaml:"server_bin"`
 	URL        string `yaml:"url"`
 	Tool       string `yaml:"tool"`

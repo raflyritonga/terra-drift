@@ -29,9 +29,9 @@ func newOpenAICompatible(id, baseURL string) (OpenAICompatible, error) {
 	if id == "" {
 		return OpenAICompatible{}, fmt.Errorf("openai-compatible model needs model.id")
 	}
-	key := os.Getenv("LLM_API_KEY")
+	key := readSecret("LLM_API_KEY")
 	if key == "" {
-		key = os.Getenv("OPENAI_API_KEY")
+		key = readSecret("OPENAI_API_KEY")
 	}
 	return OpenAICompatible{
 		endpoint: strings.TrimRight(baseURL, "/") + "/chat/completions",
@@ -39,6 +39,21 @@ func newOpenAICompatible(id, baseURL string) (OpenAICompatible, error) {
 		apiKey:   key,
 		http:     &http.Client{Timeout: 90 * time.Second},
 	}, nil
+}
+
+// readSecret returns $NAME, or the trimmed contents of the file at $NAME_FILE.
+// The file form lets the key come from systemd credentials or a mounted secret
+// instead of living in the process environment.
+func readSecret(name string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	if path := os.Getenv(name + "_FILE"); path != "" {
+		if b, err := os.ReadFile(path); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	return ""
 }
 
 func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (string, error) {

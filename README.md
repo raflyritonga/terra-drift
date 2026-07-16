@@ -4,12 +4,23 @@ Someone changes infrastructure by hand in the AWS console. Terraform's code does
 
 **Docs: https://raflyritonga.github.io/terra-drift/**
 
-## Build
+## Install
+
+Prebuilt binaries for Linux/macOS/Windows are on the [Releases page](https://github.com/raflyritonga/terra-drift/releases) (each archive has both binaries). Or from source:
+
+```sh
+go install github.com/raflyritonga/terra-drift/cmd/terra-drift@latest
+go install github.com/raflyritonga/terra-drift/cmd/terra-drift-mcp@latest
+```
+
+Or build locally:
 
 ```sh
 go build -o terra-drift     ./cmd/terra-drift    # the client (runs in CI)
 go build -o terra-drift-mcp ./cmd/terra-drift-mcp # the model server (its own box)
 ```
+
+Cut a release by pushing a tag (`git tag v0.1.0 && git push origin v0.1.0`) — CI builds every platform and publishes the archives.
 
 ## Quick look
 
