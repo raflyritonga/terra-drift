@@ -13,6 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/raflyritonga/terra-drift/internal/contract"
 	"github.com/raflyritonga/terra-drift/internal/model"
+	"github.com/raflyritonga/terra-drift/internal/secret"
 	"github.com/raflyritonga/terra-drift/internal/serverconfig"
 	"github.com/raflyritonga/terra-drift/internal/tool"
 )
@@ -33,7 +34,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	m, err := model.New(cfg.Model.Provider, cfg.Model.ID, cfg.Model.BaseURL)
+
+	// Resolve the model key once (env or secret manager); mock needs none.
+	var apiKey string
+	if cfg.Model.Provider != "" && cfg.Model.Provider != "mock" {
+		apiKey, err = secret.Resolve(context.Background(), cfg.Secret.Source, cfg.Secret.Ref)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	m, err := model.New(cfg.Model.Provider, cfg.Model.ID, cfg.Model.BaseURL, apiKey)
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Anthropic calls Claude's native Messages API. Key from ANTHROPIC_API_KEY or
-// LLM_API_KEY (env, or the matching _FILE). base_url defaults to the public API.
+// Anthropic calls Claude's native Messages API.
+// base_url defaults to the public API.
 type Anthropic struct {
 	endpoint  string
 	model     string
@@ -21,7 +21,7 @@ type Anthropic struct {
 	http      *http.Client
 }
 
-func newAnthropic(id, baseURL string) (Anthropic, error) {
+func newAnthropic(id, baseURL, apiKey string) (Anthropic, error) {
 	if id == "" {
 		return Anthropic{}, fmt.Errorf("anthropic model needs model.id (e.g. claude-opus-4-8)")
 	}
@@ -29,14 +29,10 @@ func newAnthropic(id, baseURL string) (Anthropic, error) {
 	if base == "" {
 		base = "https://api.anthropic.com"
 	}
-	key := readSecret("ANTHROPIC_API_KEY")
-	if key == "" {
-		key = readSecret("LLM_API_KEY")
-	}
 	return Anthropic{
 		endpoint:  strings.TrimRight(base, "/") + "/v1/messages",
 		model:     id,
-		apiKey:    key,
+		apiKey:    apiKey,
 		maxTokens: 4096,
 		http:      &http.Client{Timeout: 90 * time.Second},
 	}, nil

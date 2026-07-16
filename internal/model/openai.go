@@ -7,14 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
 
 // OpenAICompatible calls any OpenAI chat-completions endpoint — a hosted model
-// like x.llm.com, a gateway, or Ollama. The API key comes from env only
-// (LLM_API_KEY, or OPENAI_API_KEY), never from config or the client.
+// like x.llm.com, a gateway, or Ollama.
 type OpenAICompatible struct {
 	endpoint string
 	model    string
@@ -22,38 +20,19 @@ type OpenAICompatible struct {
 	http     *http.Client
 }
 
-func newOpenAICompatible(id, baseURL string) (OpenAICompatible, error) {
+func newOpenAICompatible(id, baseURL, apiKey string) (OpenAICompatible, error) {
 	if baseURL == "" {
-		return OpenAICompatible{}, fmt.Errorf("openai-compatible model needs model.base_url (e.g. https://x.llm.com/v1)")
+		return OpenAICompatible{}, fmt.Errorf("openai model needs model.base_url (e.g. https://x.llm.com/v1)")
 	}
 	if id == "" {
-		return OpenAICompatible{}, fmt.Errorf("openai-compatible model needs model.id")
-	}
-	key := readSecret("LLM_API_KEY")
-	if key == "" {
-		key = readSecret("OPENAI_API_KEY")
+		return OpenAICompatible{}, fmt.Errorf("openai model needs model.id")
 	}
 	return OpenAICompatible{
 		endpoint: strings.TrimRight(baseURL, "/") + "/chat/completions",
 		model:    id,
-		apiKey:   key,
+		apiKey:   apiKey,
 		http:     &http.Client{Timeout: 90 * time.Second},
 	}, nil
-}
-
-// readSecret returns $NAME, or the trimmed contents of the file at $NAME_FILE.
-// The file form lets the key come from systemd credentials or a mounted secret
-// instead of living in the process environment.
-func readSecret(name string) string {
-	if v := os.Getenv(name); v != "" {
-		return v
-	}
-	if path := os.Getenv(name + "_FILE"); path != "" {
-		if b, err := os.ReadFile(path); err == nil {
-			return strings.TrimSpace(string(b))
-		}
-	}
-	return ""
 }
 
 func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (string, error) {
