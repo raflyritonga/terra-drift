@@ -33,6 +33,29 @@ type Git struct {
 	Repo         string `yaml:"repo"`          // repository slug/name
 	TargetBranch string `yaml:"target_branch"` // PR base, default main
 	APIBase      string `yaml:"api_base"`      // override for self-hosted servers
+	PushMode     string `yaml:"push_mode"`     // api (bitbucket default) | git
+}
+
+// ResolvedPushMode returns the effective transport for publishing the branch.
+// Bitbucket defaults to "api" (Atlassian API tokens work for REST but are
+// rejected by git-over-HTTPS); other providers default to "git".
+func (g Git) ResolvedPushMode() (string, error) {
+	switch g.PushMode {
+	case "":
+		if g.Provider == "bitbucket" || g.Provider == "" {
+			return "api", nil
+		}
+		return "git", nil
+	case "git":
+		return "git", nil
+	case "api":
+		if g.Provider != "bitbucket" && g.Provider != "" {
+			return "", fmt.Errorf("git.push_mode=api is only supported for the bitbucket provider (got %q)", g.Provider)
+		}
+		return "api", nil
+	default:
+		return "", fmt.Errorf("git.push_mode must be api or git, got %q", g.PushMode)
+	}
 }
 
 func Default() Config {

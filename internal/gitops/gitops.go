@@ -33,9 +33,19 @@ func (r *Repo) IsRepo(ctx context.Context) bool {
 	return err == nil
 }
 
-// NewBranch creates and checks out prefix<date>, e.g. drift-sync/2026-07-15.
+// TopLevel returns the repository root, for mapping edits to repo-relative paths.
+func (r *Repo) TopLevel(ctx context.Context) (string, error) {
+	return r.run(ctx, "git", "rev-parse", "--show-toplevel")
+}
+
+// BranchName is the unique timestamped branch, e.g. drift-sync/2026-07-15-060112.
+func BranchName(prefix string, now time.Time) string {
+	return prefix + now.Format("2006-01-02-150405")
+}
+
+// NewBranch creates and checks out BranchName locally (git push mode).
 func (r *Repo) NewBranch(ctx context.Context, prefix string, now time.Time) (string, error) {
-	name := prefix + now.Format("2006-01-02-150405")
+	name := BranchName(prefix, now)
 	if _, err := r.run(ctx, "git", "checkout", "-b", name); err != nil {
 		return "", err
 	}
