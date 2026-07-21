@@ -26,3 +26,17 @@ func Build(in contract.ProposalInput) (string, string, error) {
 	}
 	return sys, string(payload), nil
 }
+
+const explainSystem = `You explain Terraform drift to an engineer deciding whether to trust
+the code or the live infrastructure. For the given drifted attributes, reply in plain text:
+at most 2 short sentences per resource — what changed and the practical risk of reverting it.
+No markdown, no headings, no edit suggestions.`
+
+// BuildExplain returns the prompt for the read-only explain_drift tool.
+func BuildExplain(in contract.ExplainInput) (string, string, error) {
+	payload, err := json.Marshal(in)
+	if err != nil {
+		return "", "", err
+	}
+	return explainSystem, string(payload), nil
+}

@@ -51,3 +51,24 @@ type ProposalOutput struct {
 	Edits     []EditOut `json:"edits"`
 	Rationale string    `json:"rationale"`
 }
+
+// ExplainInput is the input schema of the explain_drift tool (the read path:
+// the model explains what changed, it proposes no edits).
+type ExplainInput struct {
+	Drifts []DriftFact `json:"drifts"`
+}
+
+// DriftFact is one drifted attribute with enough context to explain it.
+type DriftFact struct {
+	Address   string          `json:"address"`
+	Attribute string          `json:"attribute,omitempty"`
+	File      string          `json:"file,omitempty"`
+	Line      int             `json:"line,omitempty"`
+	Before    json.RawMessage `json:"before,omitempty"`
+	After     json.RawMessage `json:"after,omitempty"`
+}
+
+// ExplainOutput is the output schema of the explain_drift tool.
+type ExplainOutput struct {
+	Summary string `json:"summary"`
+}

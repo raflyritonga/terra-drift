@@ -25,8 +25,9 @@ Cut a release by pushing a tag (`git tag v0.1.0 && git push origin v0.1.0`) — 
 ## Quick look
 
 ```sh
-terra-drift check --dir envs/prod    # detect + short report; exit 0 clean / 2 drift / 1 error
+terra-drift check --dir envs/prod    # detect + short report (file:line); exit 0 clean / 2 drift / 1 error
 terra-drift sync  --dir envs/prod    # detect → report → ask which side to trust → act
+# add --explain to either: the model server appends a short read-only summary of the drift
 ```
 
 - `--trust code` — change nothing (next apply reverts the live drift)

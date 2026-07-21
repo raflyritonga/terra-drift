@@ -10,7 +10,7 @@ import (
 // The report is one line per resource — small, not plan-sized.
 func TestRenderReportIsSmall(t *testing.T) {
 	p := loadPlan(t, "drift_literal.json")
-	items, err := p.Report()
+	items, err := p.Report("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,6 +26,22 @@ func TestRenderReportIsSmall(t *testing.T) {
 	// no before→after value dump
 	if strings.Contains(out, "→") || strings.Contains(out, "hotfix") {
 		t.Fatalf("report leaked plan-style detail:\n%s", out)
+	}
+}
+
+// With a dir, each report line carries the resource block's file:line.
+func TestReportIncludesFileLine(t *testing.T) {
+	p := loadPlan(t, "drift_module_arg.json")
+	items, err := p.Report("../testdata/hcl/module_arg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := drift.RenderReport(items)
+	if !strings.Contains(out, "modules/network/sg.tf:1") {
+		t.Fatalf("report missing file:line of the resource block:\n%s", out)
+	}
+	if lines := strings.Split(strings.TrimRight(out, "\n"), "\n"); len(lines) != 1+len(items) {
+		t.Fatalf("file:line must not add lines:\n%s", out)
 	}
 }
 

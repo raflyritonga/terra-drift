@@ -75,6 +75,40 @@ type frame struct {
 	name string
 }
 
+// resolveFrames descends the module path, tracking each module's source dir.
+// A non-local module source returns ok=false (registry/git — v1 limit).
+func resolveFrames(root cfgRoot, modPath []string) ([]frame, bool, error) {
+	frames := []frame{{mod: root.RootModule, dir: "."}}
+	for _, name := range modPath {
+		cur := frames[len(frames)-1]
+		call, ok := cur.mod.ModuleCalls[name]
+		if !ok {
+			return nil, false, fmt.Errorf("module call %q not found in configuration", name)
+		}
+		if !strings.HasPrefix(call.Source, "./") && !strings.HasPrefix(call.Source, "../") {
+			return nil, false, nil
+		}
+		frames = append(frames, frame{mod: call.Module, dir: filepath.Join(cur.dir, call.Source), call: &call, name: name})
+	}
+	return frames, true, nil
+}
+
+// Locate returns the file (relative to repoRoot) and line of the resource
+// block at address; empty file when it cannot be found.
+func Locate(cfg json.RawMessage, address, repoRoot string) (string, int) {
+	var root cfgRoot
+	if err := json.Unmarshal(cfg, &root); err != nil {
+		return "", 0
+	}
+	modPath, localAddr := splitModulePath(address)
+	localAddr = stripIndexKey(localAddr)
+	frames, ok, err := resolveFrames(root, modPath)
+	if err != nil || !ok {
+		return "", 0
+	}
+	return newLocator(repoRoot).findBlock(frames[len(frames)-1].dir, blockLabels(localAddr))
+}
+
 // Walk traces attribute on the resource at address through the configuration.
 func Walk(cfg json.RawMessage, address, attribute, repoRoot string) (Provenance, error) {
 	var root cfgRoot
@@ -85,17 +119,12 @@ func Walk(cfg json.RawMessage, address, attribute, repoRoot string) (Provenance,
 	modPath, localAddr := splitModulePath(address)
 	localAddr = stripIndexKey(localAddr)
 
-	frames := []frame{{mod: root.RootModule, dir: "."}}
-	for _, name := range modPath {
-		cur := frames[len(frames)-1]
-		call, ok := cur.mod.ModuleCalls[name]
-		if !ok {
-			return Provenance{}, fmt.Errorf("module call %q not found in configuration", name)
-		}
-		if !strings.HasPrefix(call.Source, "./") && !strings.HasPrefix(call.Source, "../") {
-			return Provenance{Tier: Tier3Opaque, Note: fmt.Sprintf("module %q uses non-local source %q (v1 limit)", name, call.Source)}, nil
-		}
-		frames = append(frames, frame{mod: call.Module, dir: filepath.Join(cur.dir, call.Source), call: &call, name: name})
+	frames, ok, err := resolveFrames(root, modPath)
+	if err != nil {
+		return Provenance{}, err
+	}
+	if !ok {
+		return Provenance{Tier: Tier3Opaque, Note: "module uses a non-local source (v1 limit)"}, nil
 	}
 
 	depth := len(frames) - 1

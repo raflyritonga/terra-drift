@@ -12,10 +12,13 @@ const usage = `terra-drift — turn clickops drift into a reviewed pull request
 
 Usage:
   terra-drift doctor [--dir DIR]              preflight checks
-  terra-drift check  [--dir DIR] [--out FILE] detect + tiny report; exit 0 clean / 2 drift / 1 error
-  terra-drift sync   [--dir DIR] [--trust code|live|partial] [--live addr,addr]
+  terra-drift check  [--dir DIR] [--out FILE] [--explain]
+                                              detect + tiny report; exit 0 clean / 2 drift / 1 error
+  terra-drift sync   [--dir DIR] [--trust code|live|partial] [--live addr,addr] [--explain]
                                               detect → report → ask whose version to trust → act
   terra-drift version
+
+--explain asks the model server for a short read-only summary of the drift.
 `
 
 func main() {

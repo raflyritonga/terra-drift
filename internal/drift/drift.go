@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/raflyritonga/terra-drift/internal/provenance"
 )
 
 // Exit codes, mirroring `terraform plan -detailed-exitcode`.
@@ -96,10 +99,13 @@ type ResourceReport struct {
 	Address string
 	Attrs   []string
 	Deleted bool
+	File    string // resource block location, when locatable
+	Line    int
 }
 
 // Report lists the drifted resources with their changed attribute names.
-func (p *Plan) Report() ([]ResourceReport, error) {
+// When dir is non-empty, each entry is located to its file:line in the HCL.
+func (p *Plan) Report(dir string) ([]ResourceReport, error) {
 	var out []ResourceReport
 	for _, r := range p.ResourceDrift {
 		rr := ResourceReport{Address: r.Address, Deleted: r.Deleted()}
@@ -112,6 +118,9 @@ func (p *Plan) Report() ([]ResourceReport, error) {
 				rr.Attrs = append(rr.Attrs, a.Attribute)
 			}
 		}
+		if dir != "" {
+			rr.File, rr.Line = provenance.Locate(p.Configuration, r.Address, dir)
+		}
 		out = append(out, rr)
 	}
 	return out, nil
@@ -122,7 +131,11 @@ func RenderReport(items []ResourceReport) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "drift on %d resource(s):\n", len(items))
 	for _, it := range items {
-		fmt.Fprintf(&b, "  %-42s %s\n", it.Address, attrSummary(it))
+		loc := ""
+		if it.File != "" {
+			loc = fmt.Sprintf("  (%s:%d)", filepath.ToSlash(it.File), it.Line)
+		}
+		fmt.Fprintf(&b, "  %-42s %s%s\n", it.Address, attrSummary(it), loc)
 	}
 	return b.String()
 }
@@ -140,8 +153,9 @@ func attrSummary(it ResourceReport) string {
 	}
 }
 
-// Summarize prints the tiny report and returns the check exit code.
-func Summarize(planJSON []byte, outFile string) (int, error) {
+// Summarize prints the tiny report (with file:line when dir is given) and
+// returns the check exit code.
+func Summarize(planJSON []byte, outFile, dir string) (int, error) {
 	if outFile != "" {
 		if err := os.WriteFile(outFile, planJSON, 0o644); err != nil {
 			return ExitError, err
@@ -155,7 +169,7 @@ func Summarize(planJSON []byte, outFile string) (int, error) {
 		fmt.Println("no drift detected")
 		return ExitClean, nil
 	}
-	items, err := p.Report()
+	items, err := p.Report(dir)
 	if err != nil {
 		return ExitError, err
 	}

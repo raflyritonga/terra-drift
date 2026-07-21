@@ -1,5 +1,5 @@
-// Package mcpclient calls the terra-drift-mcp server's propose_hcl_edits tool
-// via the official MCP Go SDK. Only the transport differs between Model A and B.
+// Package mcpclient calls terra-drift-mcp's tools via the official MCP Go SDK.
+// Only the transport differs between Model A and B.
 package mcpclient
 
 import (
@@ -24,38 +24,47 @@ func New(cfg config.MCP, version string) *Client {
 
 func (c *Client) Propose(ctx context.Context, in contract.ProposalInput) (contract.ProposalOutput, error) {
 	var out contract.ProposalOutput
+	err := c.call(ctx, c.cfg.Tool, in, &out)
+	return out, err
+}
 
+// Explain asks the server's read-only explain_drift tool for a short summary.
+func (c *Client) Explain(ctx context.Context, in contract.ExplainInput) (contract.ExplainOutput, error) {
+	var out contract.ExplainOutput
+	err := c.call(ctx, "explain_drift", in, &out)
+	return out, err
+}
+
+// call connects, invokes one tool, and decodes its structured result into out.
+func (c *Client) call(ctx context.Context, tool string, args, out any) error {
 	client := mcp.NewClient(&mcp.Implementation{Name: "terra-drift", Version: c.version}, nil)
 	transport, err := c.transport()
 	if err != nil {
-		return out, err
+		return err
 	}
 
 	session, err := client.Connect(ctx, transport, nil)
 	if err != nil {
-		return out, fmt.Errorf("connect to MCP server: %w", err)
+		return fmt.Errorf("connect to MCP server: %w", err)
 	}
 	defer session.Close()
 
-	res, err := session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      c.cfg.Tool,
-		Arguments: in,
-	})
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
 	if err != nil {
-		return out, fmt.Errorf("call %s: %w", c.cfg.Tool, err)
+		return fmt.Errorf("call %s: %w", tool, err)
 	}
 	if res.IsError {
-		return out, fmt.Errorf("server rejected proposal: %s", textContent(res))
+		return fmt.Errorf("server rejected %s: %s", tool, textContent(res))
 	}
 
 	raw, err := json.Marshal(res.StructuredContent)
 	if err != nil {
-		return out, fmt.Errorf("re-encode structured result: %w", err)
+		return fmt.Errorf("re-encode structured result: %w", err)
 	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return out, fmt.Errorf("parse proposal output: %w", err)
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("parse %s output: %w", tool, err)
 	}
-	return out, nil
+	return nil
 }
 
 // transport picks Model A (stdio subprocess) or Model B (networked) from config.
