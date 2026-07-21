@@ -34,6 +34,8 @@ terra-drift sync  --dir envs/prod    # detect → report → ask which side to t
 - `--trust live` — rewrite code to match reality, open a PR
 - `--trust partial --live aws_x.y` — trust reality for named resources only
 
+For Bitbucket, the fix branch + commit are published via the REST API by default (`git.push_mode: api`) — no `git push`, so Atlassian API tokens work end to end. Set `push_mode: git` to use git transport instead.
+
 In a terminal it prompts; in CI it prints the report and exits 2 until you pass `--trust`.
 
 ## Layout

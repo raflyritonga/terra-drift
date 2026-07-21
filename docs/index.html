@@ -126,7 +126,8 @@ git push origin v0.1.0</code></pre>
   <tr><td><code>terra-drift-mcp</code></td><td>the server: talks to your model, returns structured edits</td><td>its own box, as an HTTP service</td></tr>
 </table>
 <p>The client calls the server for two things: explaining drift when you pass <code>--explain</code> (read-only), and proposing edits for the hard cases (tier 2 — see <a href="#tiers">tiers</a>). Simple drift is edited by the client alone, no model involved.</p>
-<p>The git host (Bitbucket, GitHub, GitLab) is reached over its REST API. The runner does <strong>not</strong> need to be hosted by it — a self-hosted Jenkins runner opening PRs against Bitbucket Cloud is fine. The runner needs push access to the repo and an API token.</p>
+<p>The git host (Bitbucket, GitHub, GitLab) is reached over its REST API. The runner does <strong>not</strong> need to be hosted by it — a self-hosted Jenkins runner opening PRs against Bitbucket Cloud is fine.</p>
+<p>For <strong>Bitbucket</strong>, the branch and commit are also published over REST (<code>POST /src</code>) by default — no <code>git push</code> at all. This matters because Atlassian API tokens work for the REST API but are <em>rejected</em> by git-over-HTTPS; with the default <code>push_mode: api</code> the same token covers everything. Set <code>git.push_mode: git</code> to keep the old git-push path. GitHub/GitLab always push via git and need push credentials on the checkout.</p>
 
 <h2 id="server">Host the server</h2>
 <p><code>terra-drift-mcp</code> is one static binary. Put it on a machine that can (a) reach your model endpoint and (b) be reached by your CI runners on its listen port. It needs <strong>no</strong> AWS, Terraform, git, or repo access — only the model API key.</p>
@@ -226,7 +227,7 @@ TERRA_DRIFT_MCP_SECRET_REF=prod/terra-drift/llm-key
   <tr><th>Secret</th><th>Used by</th><th>Lives on</th><th>Given as</th></tr>
   <tr><td>Model API key</td><td>server</td><td>the server box only</td><td><code>LLM_API_KEY</code> env (600 file or the box's secret manager)</td></tr>
   <tr><td>PR API token</td><td>client</td><td>CI runner</td><td>provider env var (below), from your CI secret store</td></tr>
-  <tr><td>git push credential</td><td>client</td><td>CI runner</td><td>HTTPS app password or SSH key in the checkout's remote</td></tr>
+  <tr><td>git push credential</td><td>client</td><td>CI runner</td><td>only for <code>push_mode: git</code> (GitHub/GitLab, or Bitbucket opt-out): HTTPS app password or SSH key. Bitbucket's default <code>api</code> mode needs none — the API token covers publish + PR</td></tr>
   <tr><td>AWS credentials</td><td>client</td><td>CI runner</td><td>OIDC / assumed role (avoid long-lived keys)</td></tr>
 </table>
 
@@ -277,6 +278,7 @@ git:
   workspace: acme            # bitbucket workspace / github owner / gitlab group
   repo: infra
   target_branch: main
+  push_mode: api             # bitbucket only: api (default — REST /src, no git push) | git
   # api_base: ""             # self-hosted: Bitbucket Server, GitLab CE, GH Enterprise</code></pre>
 
 <h3>Server — <code>terra-drift-mcp.yaml</code> (or the env vars shown above)</h3>

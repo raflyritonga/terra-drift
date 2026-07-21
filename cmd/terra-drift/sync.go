@@ -47,6 +47,10 @@ func runSync(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
+	pushMode, err := cfg.Git.ResolvedPushMode()
+	if err != nil {
+		return 1, err
+	}
 
 	runner := tf.New(*dir)
 	code, planJSON, err := runner.RefreshPlan(ctx)
@@ -101,33 +105,72 @@ func runSync(args []string) (int, error) {
 		return 0, nil
 	}
 
+	// Two publish transports: "git" branches/commits/pushes locally; "api"
+	// (bitbucket default) edits the working tree only and publishes the
+	// branch + commit over REST — Atlassian API tokens can't git push.
 	repo := gitops.New(*dir)
-	branch, err := repo.NewBranch(ctx, cfg.Git.BranchPrefix, time.Now())
-	if err != nil {
+	var branch string
+	var apply applier
+	touched := map[string]bool{}
+	if pushMode == "api" {
+		branch = gitops.BranchName(cfg.Git.BranchPrefix, time.Now())
+		apply = func(_ context.Context, chs []change) error { return applyTrack(*dir, chs, touched) }
+		fmt.Printf("branch %s will be published via the %s API\n", branch, cfg.Git.Provider)
+	} else {
+		branch, err = repo.NewBranch(ctx, cfg.Git.BranchPrefix, time.Now())
+		if err != nil {
+			return 1, err
+		}
+		apply = func(c context.Context, chs []change) error { return applyAndCommit(c, repo, *dir, chs) }
+		fmt.Println("created branch", branch)
+	}
+
+	if err := apply(ctx, changes); err != nil {
 		return 1, err
 	}
-	fmt.Println("created branch", branch)
 
-	if err := applyAndCommit(ctx, repo, *dir, changes); err != nil {
-		return 1, err
-	}
-
-	changes, err = verifyLoop(ctx, cfg, runner, *dir, repo, changes)
+	changes, err = verifyLoop(ctx, cfg, runner, *dir, apply, changes)
 	if err != nil {
 		return 1, err
 	}
 
 	if *noPR || !cfg.Git.OpenPR {
-		fmt.Println("skipping PR (per flags/config); review branch", branch)
+		if pushMode == "api" {
+			fmt.Println("skipping publish/PR (per flags/config); edits are in the working tree")
+		} else {
+			fmt.Println("skipping PR (per flags/config); review branch", branch)
+		}
 		return 0, nil
 	}
 	forge, err := gitops.NewForge(cfg.Git)
 	if err != nil {
 		return 1, err
 	}
-	if err := repo.Push(ctx, branch); err != nil {
-		return 1, err
+
+	if pushMode == "api" {
+		pub, ok := forge.(gitops.BranchPublisher)
+		if !ok {
+			return 1, fmt.Errorf("git.push_mode=api is not supported by the %s provider", cfg.Git.Provider)
+		}
+		files, err := collectFiles(ctx, repo, *dir, touched)
+		if err != nil {
+			return 1, err
+		}
+		if err := pub.PublishBranch(ctx, gitops.Commit{
+			Branch:       branch,
+			TargetBranch: cfg.Git.TargetBranch,
+			Message:      commitMessage(changes),
+			Files:        files,
+		}); err != nil {
+			return 1, err
+		}
+		fmt.Printf("published branch %s (%d file(s)) via API\n", branch, len(files))
+	} else {
+		if err := repo.Push(ctx, branch); err != nil {
+			return 1, err
+		}
 	}
+
 	url, err := forge.OpenPR(ctx, gitops.PullRequest{
 		Title:        prTitle(changes),
 		Body:         prBody(changes),
@@ -139,6 +182,74 @@ func runSync(args []string) (int, error) {
 	}
 	fmt.Println("opened PR:", url)
 	return 0, nil
+}
+
+// applier applies the resolved edits; git mode also commits, api mode only
+// tracks which files were touched.
+type applier func(ctx context.Context, changes []change) error
+
+// applyTrack writes edits to the working tree and records the touched files.
+func applyTrack(dir string, changes []change, touched map[string]bool) error {
+	for i := range changes {
+		c := &changes[i]
+		if len(c.Edits) == 0 {
+			continue
+		}
+		applied := false
+		for _, e := range c.Edits {
+			if err := patch.Apply(dir, e); err != nil {
+				c.Note = "apply failed: " + err.Error()
+				c.Edits = nil
+				applied = false
+				break
+			}
+			touched[e.File] = true
+			applied = true
+		}
+		if applied {
+			fmt.Printf("  applied fix for %s.%s (%s)\n", c.Address, c.Attr.Attribute, c.Prov.Tier)
+		}
+	}
+	return nil
+}
+
+// collectFiles reads the touched files and keys them by repo-relative path,
+// which is what the Bitbucket /src endpoint expects as field names.
+func collectFiles(ctx context.Context, repo *gitops.Repo, dir string, touched map[string]bool) (map[string][]byte, error) {
+	top, err := repo.TopLevel(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("find repo root: %w", err)
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]byte{}
+	for f := range touched {
+		abs := filepath.Clean(filepath.Join(absDir, f))
+		rel, err := filepath.Rel(top, abs)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return nil, fmt.Errorf("edited file %s is outside the repository %s", abs, top)
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return nil, err
+		}
+		out[filepath.ToSlash(rel)] = data
+	}
+	return out, nil
+}
+
+// commitMessage summarizes all changes for the single API-mode commit.
+func commitMessage(changes []change) string {
+	var b strings.Builder
+	b.WriteString(prTitle(changes))
+	for _, c := range changes {
+		if len(c.Edits) > 0 {
+			fmt.Fprintf(&b, "\n- %s %s", c.Address, c.Attr.Attribute)
+		}
+	}
+	return b.String()
 }
 
 // classify walks provenance and resolves edits for the resources trusted live.
@@ -260,8 +371,8 @@ func applyAndCommit(ctx context.Context, repo *gitops.Repo, dir string, changes 
 	return nil
 }
 
-// verifyLoop re-plans and retries tier-2 residuals up to max_retries (§8 rule 3).
-func verifyLoop(ctx context.Context, cfg config.Config, runner *tf.Runner, dir string, repo *gitops.Repo, changes []change) ([]change, error) {
+// verifyLoop re-plans and retries tier-2 residuals up to max_retries.
+func verifyLoop(ctx context.Context, cfg config.Config, runner *tf.Runner, dir string, apply applier, changes []change) ([]change, error) {
 	for attempt := 0; ; attempt++ {
 		code, planJSON, err := runner.RefreshPlan(ctx)
 		if err != nil {
@@ -303,7 +414,7 @@ func verifyLoop(ctx context.Context, cfg config.Config, runner *tf.Runner, dir s
 			fmt.Println("verify: some resources remain drifted; noted in the PR body")
 			return changes, nil
 		}
-		if err := applyAndCommit(ctx, repo, dir, changes); err != nil {
+		if err := apply(ctx, changes); err != nil {
 			return changes, err
 		}
 	}
