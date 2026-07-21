@@ -39,6 +39,7 @@ func runSync(args []string) (int, error) {
 	trustMode := fs.String("trust", "", "whose version to trust: code | live | partial (default: ask, or report-only in CI)")
 	liveCSV := fs.String("live", "", "partial mode: comma-separated resource addresses to trust live")
 	noPR := fs.Bool("no-pr", false, "on the live path, commit the branch but skip push/PR")
+	explain := fs.Bool("explain", false, "ask the model server for a short explanation before deciding")
 	fs.Parse(args)
 
 	ctx := context.Background()
@@ -61,11 +62,14 @@ func runSync(args []string) (int, error) {
 	if err != nil {
 		return 1, err
 	}
-	items, err := p.Report()
+	items, err := p.Report(*dir)
 	if err != nil {
 		return 1, err
 	}
 	fmt.Print(drift.RenderReport(items))
+	if *explain {
+		printExplanation(ctx, *dir, planJSON)
+	}
 	fmt.Println("\ntrusting \"live\" rewrites your .tf to match reality — can be destructive.\n\"code\" changes nothing; the next terraform apply reverts the live drift.")
 
 	live, decided, err := trust.Resolve(*trustMode, *liveCSV, items, isInteractive(), bufio.NewReader(os.Stdin), os.Stdout)

@@ -29,7 +29,7 @@ func TestCheckExitCodes(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		code, err := drift.Summarize(data, "")
+		code, err := drift.Summarize(data, "", "")
 		if code != tc.want {
 			t.Errorf("%s: exit code = %d, want %d (err: %v)", tc.fixture, code, tc.want, err)
 		}
@@ -45,7 +45,7 @@ func TestCheckOutWritesPlanJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "drift.json")
-	if _, err := drift.Summarize(data, out); err != nil {
+	if _, err := drift.Summarize(data, out, ""); err != nil {
 		t.Fatal(err)
 	}
 	written, err := os.ReadFile(out)

@@ -41,6 +41,40 @@ func ProposalInputSchema() *jsonschema.Schema {
 	}
 }
 
+// ExplainInputSchema is the explicit input schema of explain_drift.
+func ExplainInputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:     "object",
+		Required: []string{"drifts"},
+		Properties: map[string]*jsonschema.Schema{
+			"drifts": {
+				Type: "array",
+				Items: &jsonschema.Schema{
+					Type:     "object",
+					Required: []string{"address"},
+					Properties: map[string]*jsonschema.Schema{
+						"address":   str(),
+						"attribute": str(),
+						"file":      str(),
+						"line":      {Type: "integer"},
+						"before":    anyJSON(),
+						"after":     anyJSON(),
+					},
+				},
+			},
+		},
+	}
+}
+
+// ExplainOutputSchema is the explicit output schema of explain_drift.
+func ExplainOutputSchema() *jsonschema.Schema {
+	return &jsonschema.Schema{
+		Type:       "object",
+		Required:   []string{"summary"},
+		Properties: map[string]*jsonschema.Schema{"summary": str()},
+	}
+}
+
 // ProposalOutputSchema is the explicit tool output schema.
 func ProposalOutputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{

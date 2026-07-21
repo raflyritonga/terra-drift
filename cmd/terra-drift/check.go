@@ -13,11 +13,17 @@ func runCheck(args []string) (int, error) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	dir := fs.String("dir", ".", "Terraform root directory")
 	out := fs.String("out", "", "write the plan JSON to this file")
+	explain := fs.Bool("explain", false, "ask the model server for a short explanation of the drift")
 	fs.Parse(args)
 
-	_, planJSON, err := tf.New(*dir).RefreshPlan(context.Background())
+	ctx := context.Background()
+	_, planJSON, err := tf.New(*dir).RefreshPlan(ctx)
 	if err != nil {
 		return drift.ExitError, err
 	}
-	return drift.Summarize(planJSON, *out)
+	code, err := drift.Summarize(planJSON, *out, *dir)
+	if code == drift.ExitDrift && *explain {
+		printExplanation(ctx, *dir, planJSON)
+	}
+	return code, err
 }

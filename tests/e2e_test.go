@@ -79,7 +79,21 @@ func runPipeline(t *testing.T, mcpCfg config.MCP) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := mcpclient.New(mcpCfg, "test").Propose(ctx, in)
+	cli := mcpclient.New(mcpCfg, "test")
+
+	// read path: the server explains the drift
+	expl, err := cli.Explain(ctx, contract.ExplainInput{Drifts: []contract.DriftFact{
+		{Address: r.Address, Attribute: attr.Attribute, Before: attr.Before, After: attr.After},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expl.Summary == "" {
+		t.Fatal("empty explanation from server")
+	}
+
+	// write path: the server proposes structured edits
+	out, err := cli.Propose(ctx, in)
 	if err != nil {
 		t.Fatal(err)
 	}

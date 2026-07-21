@@ -76,6 +76,26 @@ func TestHandlerRejectsUnusableModelOutput(t *testing.T) {
 	}
 }
 
+// The explain tool is the read path: prose in, summary out, no edits anywhere.
+func TestExplainDrift(t *testing.T) {
+	h := &tool.Handler{Model: model.MockModel{}}
+	in := contract.ExplainInput{Drifts: []contract.DriftFact{
+		{Address: "aws_security_group.web", Attribute: "ingress", File: "main.tf", Line: 3},
+		{Address: `module.rt["a"].aws_route_table.this`, Attribute: "route"},
+	}}
+	_, out, err := h.ExplainDrift(context.Background(), nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Summary == "" {
+		t.Fatal("empty explanation")
+	}
+
+	if _, _, err := h.ExplainDrift(context.Background(), nil, contract.ExplainInput{}); err == nil {
+		t.Fatal("expected error for empty drift list")
+	}
+}
+
 type proseModel struct{}
 
 func (proseModel) Complete(context.Context, string, string) (string, error) {

@@ -56,6 +56,12 @@ func main() {
 		InputSchema:  contract.ProposalInputSchema(),
 		OutputSchema: contract.ProposalOutputSchema(),
 	}, h.ProposeHclEdits)
+	mcp.AddTool(s, &mcp.Tool{
+		Name:         "explain_drift",
+		Description:  "Explain drifted attributes and the risk of reverting them. Read-only.",
+		InputSchema:  contract.ExplainInputSchema(),
+		OutputSchema: contract.ExplainOutputSchema(),
+	}, h.ExplainDrift)
 
 	switch cfg.Transport {
 	case "stdio":

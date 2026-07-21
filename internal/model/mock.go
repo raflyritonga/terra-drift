@@ -13,9 +13,14 @@ import (
 // pipeline is testable end-to-end with no cloud, no keys, no real model.
 type MockModel struct{}
 
-// Complete parses the ProposalInput payload and proposes setting the drifted
-// attribute to its live value at the first provenance link (the resource block).
+// Complete answers both tools deterministically: explain payloads get a canned
+// summary; proposal payloads get an edit at the first provenance link.
 func (MockModel) Complete(_ context.Context, _ string, userPayload string) (string, error) {
+	var ex contract.ExplainInput
+	if err := json.Unmarshal([]byte(userPayload), &ex); err == nil && len(ex.Drifts) > 0 {
+		return fmt.Sprintf("mock: %d drifted attribute(s); review the values before trusting live.", len(ex.Drifts)), nil
+	}
+
 	var in contract.ProposalInput
 	if err := json.Unmarshal([]byte(userPayload), &in); err != nil {
 		return "", fmt.Errorf("mock model: unparseable payload: %w", err)

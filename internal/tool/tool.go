@@ -39,6 +39,33 @@ func (h *Handler) ProposeHclEdits(ctx context.Context, _ *mcp.CallToolRequest, i
 	return nil, out, nil
 }
 
+// ExplainDrift is the read path: the model describes the drift and its risk.
+// Plain-text reply, length-capped; it never proposes or applies edits.
+func (h *Handler) ExplainDrift(ctx context.Context, _ *mcp.CallToolRequest, in contract.ExplainInput) (*mcp.CallToolResult, contract.ExplainOutput, error) {
+	var out contract.ExplainOutput
+	if len(in.Drifts) == 0 {
+		return nil, out, fmt.Errorf("no drifts to explain")
+	}
+
+	sys, payload, err := prompt.BuildExplain(in)
+	if err != nil {
+		return nil, out, fmt.Errorf("build prompt: %w", err)
+	}
+	reply, err := h.Model.Complete(ctx, sys, payload)
+	if err != nil {
+		return nil, out, fmt.Errorf("model: %w", err)
+	}
+
+	reply = strings.TrimSpace(reply)
+	if reply == "" {
+		return nil, out, fmt.Errorf("model returned an empty explanation")
+	}
+	if len(reply) > 1200 {
+		reply = reply[:1200] + "…"
+	}
+	return nil, contract.ExplainOutput{Summary: reply}, nil
+}
+
 // ParseStrict rejects anything that is not a pure structured-edits JSON object.
 func ParseStrict(reply string) (contract.ProposalOutput, error) {
 	var out contract.ProposalOutput
