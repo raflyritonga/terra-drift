@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/raflyritonga/terra-drift/internal/config"
 )
@@ -113,6 +114,46 @@ func buildSrcForm(c Commit, parent string) (*bytes.Buffer, string, error) {
 		return nil, "", err
 	}
 	return &buf, w.FormDataContentType(), nil
+}
+
+// FindOpenPR returns the first open PR whose source branch has the prefix.
+func (b *bitbucket) FindOpenPR(ctx context.Context, branchPrefix string) (*ExistingPR, error) {
+	url := fmt.Sprintf("%s/repositories/%s/%s/pullrequests?state=OPEN&pagelen=50", b.apiBase, b.workspace, b.repo)
+	var out struct {
+		Values []struct {
+			ID          int    `json:"id"`
+			Description string `json:"description"`
+			Source      struct {
+				Branch struct {
+					Name string `json:"name"`
+				} `json:"branch"`
+			} `json:"source"`
+			Links struct {
+				HTML struct {
+					Href string `json:"href"`
+				} `json:"html"`
+			} `json:"links"`
+		} `json:"values"`
+	}
+	if err := getJSON(ctx, b.http, url, &out, b.auth); err != nil {
+		return nil, fmt.Errorf("bitbucket list PRs: %w", err)
+	}
+	for _, v := range out.Values {
+		if strings.HasPrefix(v.Source.Branch.Name, branchPrefix) {
+			return &ExistingPR{ID: v.ID, SourceBranch: v.Source.Branch.Name, Body: v.Description, URL: v.Links.HTML.Href}, nil
+		}
+	}
+	return nil, nil
+}
+
+// UpdatePR rewrites an open PR's title and body.
+func (b *bitbucket) UpdatePR(ctx context.Context, id int, title, body string) error {
+	url := fmt.Sprintf("%s/repositories/%s/%s/pullrequests/%d", b.apiBase, b.workspace, b.repo, id)
+	payload := map[string]string{"title": title, "description": body}
+	if err := putJSON(ctx, b.http, url, payload, &struct{}{}, b.auth); err != nil {
+		return fmt.Errorf("bitbucket update PR %d: %w", id, err)
+	}
+	return nil
 }
 
 func (b *bitbucket) OpenPR(ctx context.Context, pr PullRequest) (string, error) {

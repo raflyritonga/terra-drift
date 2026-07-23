@@ -9,6 +9,7 @@ import (
 	"github.com/raflyritonga/terra-drift/internal/contract"
 	"github.com/raflyritonga/terra-drift/internal/patch"
 	"github.com/raflyritonga/terra-drift/internal/provenance"
+	"github.com/raflyritonga/terra-drift/internal/tf"
 )
 
 func sgProvenance() provenance.Provenance {
@@ -46,6 +47,38 @@ func TestMinimalDiffGuard(t *testing.T) {
 	ignore := contract.Edit{Op: contract.OpIgnore}
 	if err := patch.GuardMinimal(ignore, allowed); err != nil {
 		t.Fatalf("ignore op must pass: %v", err)
+	}
+}
+
+// C3: the drift hash is stable across runs and changes with content.
+func TestDriftHashStable(t *testing.T) {
+	h1, err := loadPlan(t, "drift_module_arg.json").Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h2, _ := loadPlan(t, "drift_module_arg.json").Hash()
+	if h1 == "" || h1 != h2 {
+		t.Fatalf("hash not stable: %q vs %q", h1, h2)
+	}
+	other, _ := loadPlan(t, "drift_literal.json").Hash()
+	if other == h1 {
+		t.Fatal("different drift sets must hash differently")
+	}
+}
+
+// C4: refresh failures classify into actionable skip reasons.
+func TestRefreshErrorClassification(t *testing.T) {
+	cases := map[string]string{
+		"Error: AccessDenied: User is not authorized to perform s3:GetObject": tf.ReasonNoIdentityPolicy,
+		"api error Forbidden: Forbidden":                                      tf.ReasonNoIdentityPolicy,
+		"explicit deny in a permissions boundary":                             tf.ReasonBoundaryDenied,
+		"error calling sts:AssumeRole: AccessDenied":                          tf.ReasonTrustDenied,
+		"connection reset by peer":                                            tf.ReasonProviderError,
+	}
+	for stderr, want := range cases {
+		if got := tf.Classify(stderr).Reason; got != want {
+			t.Errorf("%q → %s, want %s", stderr, got, want)
+		}
 	}
 }
 

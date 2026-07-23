@@ -37,6 +37,21 @@ type BranchPublisher interface {
 	PublishBranch(ctx context.Context, c Commit) error
 }
 
+// ExistingPR is an already-open drift PR found on the host.
+type ExistingPR struct {
+	ID           int
+	SourceBranch string
+	Body         string
+	URL          string
+}
+
+// PRManager is implemented by forges that can find and update open PRs,
+// enabling dedupe instead of a fresh PR per run. Bitbucket only, today.
+type PRManager interface {
+	FindOpenPR(ctx context.Context, branchPrefix string) (*ExistingPR, error)
+	UpdatePR(ctx context.Context, id int, title, body string) error
+}
+
 func NewForge(cfg config.Git) (Forge, error) {
 	if cfg.Workspace == "" || cfg.Repo == "" {
 		return nil, fmt.Errorf("git.workspace and git.repo are required to open a PR")
@@ -64,11 +79,19 @@ func base(url, fallback string) string {
 
 // postJSON sends body as JSON, applies auth, and decodes a 2xx response into out.
 func postJSON(ctx context.Context, c *http.Client, url string, body, out any, auth func(*http.Request)) error {
+	return sendJSON(ctx, c, http.MethodPost, url, body, out, auth)
+}
+
+func putJSON(ctx context.Context, c *http.Client, url string, body, out any, auth func(*http.Request)) error {
+	return sendJSON(ctx, c, http.MethodPut, url, body, out, auth)
+}
+
+func sendJSON(ctx context.Context, c *http.Client, method, url string, body, out any, auth func(*http.Request)) error {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewReader(buf))
 	if err != nil {
 		return err
 	}

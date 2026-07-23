@@ -44,7 +44,7 @@ func (r *Runner) RefreshPlan(ctx context.Context) (int, []byte, error) {
 		}
 		code = exitErr.ExitCode()
 		if code != drift.ExitDrift {
-			return drift.ExitError, nil, fmt.Errorf("terraform plan failed: %s", stderr.String())
+			return drift.ExitError, nil, Classify(stderr.String())
 		}
 	}
 
