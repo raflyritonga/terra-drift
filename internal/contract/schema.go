@@ -14,6 +14,8 @@ func ProposalInputSchema() *jsonschema.Schema {
 		Type:     "object",
 		Required: []string{"drift"},
 		Properties: map[string]*jsonschema.Schema{
+			"contract_version": str(),
+			"allowed_attrs":    {Type: "array", Items: str()},
 			"drift": {
 				Type:     "object",
 				Required: []string{"address", "attribute"},

@@ -66,6 +66,31 @@ func (r *Runner) Version(ctx context.Context) (string, error) {
 	return string(bytes.SplitN(out, []byte("\n"), 2)[0]), nil
 }
 
+// Fmt formats the whole tree under dir so applied edits match house style.
+func (r *Runner) Fmt(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, r.Bin, "fmt", "-recursive")
+	cmd.Dir = r.Dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("terraform fmt: %s", stderr.String())
+	}
+	return nil
+}
+
+// Validate confirms the edited configuration still parses and type-checks.
+func (r *Runner) Validate(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, r.Bin, "validate", "-no-color")
+	cmd.Dir = r.Dir
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("terraform validate: %s%s", out.String(), stderr.String())
+	}
+	return nil
+}
+
 // StateReachable checks the backend responds; requires an init'd root.
 func (r *Runner) StateReachable(ctx context.Context) error {
 	cmd := exec.CommandContext(ctx, r.Bin, "state", "list")
