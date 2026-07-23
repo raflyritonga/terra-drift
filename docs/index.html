@@ -148,6 +148,7 @@ TERRA_DRIFT_MCP_LISTEN=:8080 \
 TERRA_DRIFT_MCP_MODEL_PROVIDER=openai \
 TERRA_DRIFT_MCP_MODEL_ID=gpt-4o-mini \
 TERRA_DRIFT_MCP_MODEL_BASE_URL=https://api.openai.com/v1 \
+TERRA_DRIFT_MCP_AUTH_TOKEN=choose-a-long-random-string \
 LLM_API_KEY=sk-... \
 terra-drift-mcp</code></pre>
 <p>Set <code>TERRA_DRIFT_MCP_MODEL_PROVIDER=mock</code> to run with canned edits and no key for testing.</p>
@@ -161,6 +162,7 @@ TERRA_DRIFT_MCP_LISTEN=:8080
 TERRA_DRIFT_MCP_MODEL_PROVIDER=openai
 TERRA_DRIFT_MCP_MODEL_ID=gpt-4o-mini
 TERRA_DRIFT_MCP_MODEL_BASE_URL=https://api.openai.com/v1
+TERRA_DRIFT_MCP_AUTH_TOKEN=choose-a-long-random-string
 LLM_API_KEY=sk-...
 EOF</code></pre>
 <p>Unit — <code>/etc/systemd/system/terra-drift-mcp.service</code>:</p>
@@ -191,6 +193,7 @@ TERRA_DRIFT_MCP_MODEL_ID=gpt-4o-mini
 TERRA_DRIFT_MCP_MODEL_BASE_URL=https://api.openai.com/v1
 TERRA_DRIFT_MCP_SECRET_SOURCE=aws-secrets-manager
 TERRA_DRIFT_MCP_SECRET_REF=prod/terra-drift/llm-key
+TERRA_DRIFT_MCP_AUTH_TOKEN=choose-a-long-random-string
 # no LLM_API_KEY here — the role fetches it</code></pre>
 <p>The AWS region and credentials come from the standard chain (the instance/task role), so nothing else is needed. The role needs <code>secretsmanager:GetSecretValue</code> on that secret.</p>
 
@@ -291,12 +294,18 @@ model:
 secret:
   source: env              # env (default) | aws-secrets-manager
   ref: ""                  # secret id/ARN when source is aws-secrets-manager
-# the key is never in this file: source=env reads LLM_API_KEY, source=aws-secrets-manager
-# fetches ref using the box's IAM role</code></pre>
+limits:                    # cost/abuse controls; all fail closed (defaults shown)
+  max_prompt_bytes: 65536
+  request_timeout_s: 60
+  rate_per_minute: 30
+  cache_ttl_minutes: 1440  # proposals cached by resource+attrs+value+model
+  validate_retry_max: 1    # bounded retry when the model's edit fails validation
+# secrets are never in this file: the model key comes from LLM_API_KEY or the
+# secret manager ref; the http bearer comes from TERRA_DRIFT_MCP_AUTH_TOKEN</code></pre>
 
 <h2 id="ci">CI setup</h2>
 <p>Two moments: a <strong>scheduled</strong> job that detects drift and prints the report (changes nothing), and an <strong>on-demand</strong> run where a human passes their decision with <code>--trust</code>. Optionally, a <strong>pre-apply gate</strong> that fails a deploy while drift is unresolved.</p>
-<p>Set these on the runner (values from your secret store): the model URL <code>TERRA_DRIFT_MCP_URL</code>, AWS creds, and the PR token for your provider. Replace <code>envs/prod</code> and <code>acme/infra</code>.</p>
+<p>Set these on the runner (values from your secret store): the server URL <code>TERRA_DRIFT_MCP_URL</code>, the server bearer <code>TERRA_DRIFT_MCP_AUTH_TOKEN</code> (same value the server was started with), AWS creds, and the PR token for your provider. Replace <code>envs/prod</code> and <code>acme/infra</code>.</p>
 
 <div class="tabs">
   <button class="active" data-tab="gh">GitHub Actions</button>
@@ -463,15 +472,21 @@ pipelines:
   The security group gained an ingress rule for 203.0.113.0/24; reverting it
   will cut off whatever started using that range.</code></pre>
 
+<h3>One PR per drift set</h3>
+<p>Every run computes a stable hash of the drift set and embeds it in the PR body (<code>drift-hash:</code>). If an open drift PR already covers the same hash, the run stops — no duplicate PRs from a daily schedule. If the drift changed, the existing PR's branch gets the new commit and its body is updated instead of opening a fresh one (Bitbucket).</p>
+<p>After acting on <code>live</code>, the PR body reports three buckets: <strong>fixed</strong> (drift resolved, proven by a clean re-plan), <strong>skipped-protected</strong> (the fix would land under <code>protected_paths</code>), and <strong>could-not-fix</strong> (tier 3, rejected proposals, still drifted after retries).</p>
+
 <h2 id="commands">Commands</h2>
 <pre><code>terra-drift doctor   # preflight: terraform, git, config, server reachable, PR provider
 terra-drift check    # detect + report (file:line); exit 0 clean / 2 drift / 1 error
 terra-drift check --explain                           # + short model summary of the drift
 terra-drift sync     # detect -> report -> ask -> act
+terra-drift sync --dry-run --trust live               # rewrite, print the diff, restore; no PR
 terra-drift sync --explain                            # + model summary before the prompt
 terra-drift sync --trust live                         # trust reality: rewrite + PR
 terra-drift sync --trust code                         # trust code: no changes
 terra-drift sync --trust partial --live aws_x.y       # trust reality for named resources</code></pre>
+<p>Exit codes are stable across both commands: <strong>0</strong> = no drift, <strong>2</strong> = drift was found (whatever action was taken, including <code>--trust code</code>), <strong>1</strong> = error. A refresh failure is classified in the output (<code>no-identity-policy</code>, <code>boundary-denied</code>, <code>trust-denied</code>, <code>provider-error</code>) so a skipped root tells you why.</p>
 
 <h2 id="tiers">Tiers &amp; safety</h2>
 <p>A drifted value often isn't a literal in the resource block — it flows through variables, module arguments, tfvars. terra-drift edits where the value <em>originates</em>.</p>
@@ -485,9 +500,17 @@ terra-drift sync --trust partial --live aws_x.y       # trust reality for named 
 <p>Safety rules, enforced by the client regardless of what the server proposes:</p>
 <ul>
   <li>Never edit under <code>protected_paths</code> (default <code>modules/**</code>) when the value is settable from a caller.</li>
+  <li><strong>Minimal diff</strong>: a proposed edit may only touch files on the drifted attribute's provenance chain and the drifted/origin attributes — anything else is rejected and the resource skipped. Enforced on the client <em>and</em> re-checked on the server (<code>allowed_attrs</code>).</li>
   <li>The model never writes files — it returns structured edits; the client writes them.</li>
-  <li>Not done until a re-plan is clean; tier-2 retries against the residual up to <code>max_retries</code>.</li>
-  <li>All writes go on a fresh branch, one commit per change, through a PR.</li>
+  <li><strong>Verified</strong>: after applying, <code>terraform fmt</code> + <code>validate</code> run and a fresh re-plan must show the resource clean before it is reported as fixed; tier-2 retries against the residual up to <code>max_retries</code>.</li>
+  <li>All writes go on a fresh branch through a PR.</li>
+</ul>
+<p>And on the server side:</p>
+<ul>
+  <li><strong>Redaction</strong>: secrets, ARNs, IPs/CIDRs, and account ids are replaced with stable placeholders before the model call and restored in the reply — raw infra values never reach the LLM.</li>
+  <li>The model sees only <strong>minimal HCL snippets</strong> (the target blocks), never whole files; temperature 0.</li>
+  <li>Prompt-size, timeout, and rate limits fail closed with typed errors (<code>budget-exceeded</code>, <code>rate-limited</code>, <code>gateway-down</code>, <code>invalid-output</code>) — the client reports them in the PR instead of failing the run.</li>
+  <li>Validated proposals are cached (default 24 h), so a daily schedule doesn't re-spend tokens on unchanged drift.</li>
 </ul>
 
 </main>
