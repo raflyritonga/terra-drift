@@ -10,10 +10,14 @@ import (
 )
 
 const system = `You reconcile Terraform drift. Given a drifted attribute, its provenance
-chain, and file excerpts, respond with ONLY a JSON object:
+chain, and minimal HCL snippets, respond with ONLY a JSON object:
 {"edits":[{"file":"...","block_addr":"...","attribute":"...","op":"set|append_to|ignore","value":<json>}],"rationale":"..."}
-Never return file contents, prose, or markdown. Prefer editing the highest
-provenance link (tfvars > module arg > module internals).`
+Hard constraints:
+- Edit ONLY the attributes listed in allowed_attrs. Nothing else.
+- No new resources, no new blocks, no comments, no reformatting.
+- Never return file contents, prose, or markdown — structured edits only.
+- Placeholders like __TD_REDACT_1__ are opaque values: copy them through unchanged.
+Prefer editing the highest provenance link (tfvars > module arg > module internals).`
 
 func Build(in contract.ProposalInput) (string, string, error) {
 	payload, err := json.Marshal(in)

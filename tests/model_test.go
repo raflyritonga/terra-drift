@@ -30,7 +30,7 @@ func TestOpenAICompatibleComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := m.Complete(context.Background(), "sys", "user")
+	out, _, err := m.Complete(context.Background(), "sys", "user")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestAnthropicComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := m.Complete(context.Background(), "be terse", "user")
+	out, _, err := m.Complete(context.Background(), "be terse", "user")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -48,11 +48,11 @@ func TestMockModelIsDeterministicAndStructured(t *testing.T) {
 	payload, _ := json.Marshal(in)
 
 	m := model.MockModel{}
-	first, err := m.Complete(context.Background(), "", string(payload))
+	first, _, err := m.Complete(context.Background(), "", string(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, _ := m.Complete(context.Background(), "", string(payload))
+	second, _, _ := m.Complete(context.Background(), "", string(payload))
 	if first != second {
 		t.Fatal("mock model is not deterministic")
 	}
@@ -98,6 +98,6 @@ func TestExplainDrift(t *testing.T) {
 
 type proseModel struct{}
 
-func (proseModel) Complete(context.Context, string, string) (string, error) {
-	return "I think you should change the security group.", nil
+func (proseModel) Complete(context.Context, string, string) (string, int, error) {
+	return "I think you should change the security group.", 0, nil
 }

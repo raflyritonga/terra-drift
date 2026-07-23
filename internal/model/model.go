@@ -7,8 +7,10 @@ import (
 	"fmt"
 )
 
+// Model completes a prompt. tokens is the provider-reported total usage
+// (0 when unknown) so callers can meter spend.
 type Model interface {
-	Complete(ctx context.Context, systemPrompt, userPayload string) (string, error)
+	Complete(ctx context.Context, systemPrompt, userPayload string) (reply string, tokens int, err error)
 }
 
 // New builds a model for the provider. The apiKey is already resolved by the
