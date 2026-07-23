@@ -1,8 +1,8 @@
 // Package contract holds the types shared by both binaries.
-// The compiler enforces that client and server agree on the edit format.
 package contract
 
 import "encoding/json"
+const Version = "2.0"
 
 // Edit ops understood by the client's patch engine.
 const (
@@ -32,9 +32,11 @@ type ChainLinkDTO struct {
 	Line int    `json:"line"`
 }
 
-// ProposalInput is the input schema of the propose_hcl_edits tool.
+// FileExcerpts carries minimal HCL snippets (the target blocks), not whole
+// files. AllowedAttrs is the closed set of attributes an edit may touch.
 type ProposalInput struct {
-	Drift struct {
+	ContractVersion string `json:"contract_version,omitempty"`
+	Drift           struct {
 		Address   string          `json:"address"`
 		Attribute string          `json:"attribute"`
 		Before    json.RawMessage `json:"before"`
@@ -42,6 +44,7 @@ type ProposalInput struct {
 	} `json:"drift"`
 	Provenance   []ChainLinkDTO    `json:"provenance,omitempty"`
 	FileExcerpts map[string]string `json:"file_excerpts,omitempty"`
+	AllowedAttrs []string          `json:"allowed_attrs,omitempty"`
 	Siblings     []json.RawMessage `json:"siblings,omitempty"`
 	SafetyRules  []string          `json:"safety_rules,omitempty"`
 }

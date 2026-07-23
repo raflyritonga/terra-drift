@@ -3,10 +3,11 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 )
 
-var version = "0.1.0-dev"
+var version = "0.5.0-dev"
 
 const usage = `terra-drift — turn clickops drift into a reviewed pull request
 
@@ -14,14 +15,19 @@ Usage:
   terra-drift doctor [--dir DIR]              preflight checks
   terra-drift check  [--dir DIR] [--out FILE] [--explain]
                                               detect + tiny report; exit 0 clean / 2 drift / 1 error
-  terra-drift sync   [--dir DIR] [--trust code|live|partial] [--live addr,addr] [--explain]
+  terra-drift sync   [--dir DIR] [--trust code|live|partial] [--live addr,addr]
+                     [--dry-run] [--explain] [--no-pr]
                                               detect → report → ask whose version to trust → act
   terra-drift version
 
+Exit codes: 0 = no drift, 2 = drift was found, 1 = error.
+--dry-run rewrites, prints the diff, restores — no branch/commit/PR.
 --explain asks the model server for a short read-only summary of the drift.
 `
 
 func main() {
+	// Structured diagnostics on stderr; the human report stays on stdout.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(1)

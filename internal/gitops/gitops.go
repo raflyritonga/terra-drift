@@ -38,6 +38,12 @@ func (r *Repo) TopLevel(ctx context.Context) (string, error) {
 	return r.run(ctx, "git", "rev-parse", "--show-toplevel")
 }
 
+// Diff shows unstaged changes for the given files (dry-run output).
+func (r *Repo) Diff(ctx context.Context, files ...string) (string, error) {
+	args := append([]string{"diff", "--no-color", "--"}, files...)
+	return r.run(ctx, "git", args...)
+}
+
 // BranchName is the unique timestamped branch, e.g. drift-sync/2026-07-15-060112.
 func BranchName(prefix string, now time.Time) string {
 	return prefix + now.Format("2006-01-02-150405")

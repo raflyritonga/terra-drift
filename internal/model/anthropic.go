@@ -38,19 +38,20 @@ func newAnthropic(id, baseURL, apiKey string) (Anthropic, error) {
 	}, nil
 }
 
-func (m Anthropic) Complete(ctx context.Context, system, user string) (string, error) {
+func (m Anthropic) Complete(ctx context.Context, system, user string) (string, int, error) {
 	body, err := json.Marshal(map[string]any{
-		"model":      m.model,
-		"max_tokens": m.maxTokens,
-		"system":     system,
-		"messages":   []map[string]string{{"role": "user", "content": user}},
+		"model":       m.model,
+		"max_tokens":  m.maxTokens,
+		"temperature": 0,
+		"system":      system,
+		"messages":    []map[string]string{{"role": "user", "content": user}},
 	})
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -60,12 +61,12 @@ func (m Anthropic) Complete(ctx context.Context, system, user string) (string, e
 
 	resp, err := m.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("call model endpoint: %w", err)
+		return "", 0, fmt.Errorf("call model endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("model endpoint %s: %s", resp.Status, snippet(data))
+		return "", 0, fmt.Errorf("model endpoint %s: %s", resp.Status, snippet(data))
 	}
 
 	var out struct {
@@ -73,9 +74,13 @@ func (m Anthropic) Complete(ctx context.Context, system, user string) (string, e
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return "", fmt.Errorf("parse model response: %w", err)
+		return "", 0, fmt.Errorf("parse model response: %w", err)
 	}
 	var b strings.Builder
 	for _, c := range out.Content {
@@ -84,7 +89,7 @@ func (m Anthropic) Complete(ctx context.Context, system, user string) (string, e
 		}
 	}
 	if b.Len() == 0 {
-		return "", fmt.Errorf("model returned no text content")
+		return "", 0, fmt.Errorf("model returned no text content")
 	}
-	return b.String(), nil
+	return b.String(), out.Usage.InputTokens + out.Usage.OutputTokens, nil
 }

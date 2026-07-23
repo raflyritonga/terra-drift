@@ -5,9 +5,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,23 +31,36 @@ func TestEndToEndStdio(t *testing.T) {
 
 // Model B: server runs as a networked HTTP service in its own process,
 // the client reaches it over TCP — the different-box deployment.
+// The endpoint is bearer-guarded; both sides get the token via env.
 func TestEndToEndHTTP(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds a binary; skipped in -short")
 	}
 	serverBin := buildServer(t)
 	addr := freeAddr(t)
+	t.Setenv("TERRA_DRIFT_MCP_AUTH_TOKEN", "e2e-secret")
 
 	cmd := exec.Command(serverBin)
 	cmd.Env = append(os.Environ(),
 		"TERRA_DRIFT_MCP_TRANSPORT=http",
 		"TERRA_DRIFT_MCP_LISTEN="+addr,
+		"TERRA_DRIFT_MCP_AUTH_TOKEN=e2e-secret",
 	)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
 	waitReachable(t, addr)
+
+	// wrong token must be rejected before reaching the tool
+	resp, err := http.Post("http://"+addr+"/", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated request got %d, want 401", resp.StatusCode)
+	}
 
 	runPipeline(t, config.MCP{Transport: "http", URL: "http://" + addr, Tool: "propose_hcl_edits"})
 }

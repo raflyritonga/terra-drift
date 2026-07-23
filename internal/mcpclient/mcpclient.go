@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"os/exec"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -68,6 +70,7 @@ func (c *Client) call(ctx context.Context, tool string, args, out any) error {
 }
 
 // transport picks Model A (stdio subprocess) or Model B (networked) from config.
+// The http transport sends the bearer from TERRA_DRIFT_MCP_AUTH_TOKEN.
 func (c *Client) transport() (mcp.Transport, error) {
 	switch c.cfg.Transport {
 	case "stdio", "":
@@ -76,10 +79,24 @@ func (c *Client) transport() (mcp.Transport, error) {
 		if c.cfg.URL == "" {
 			return nil, fmt.Errorf("mcp.transport=http requires mcp.url")
 		}
-		return &mcp.StreamableClientTransport{Endpoint: c.cfg.URL}, nil
+		t := &mcp.StreamableClientTransport{Endpoint: c.cfg.URL}
+		if token := os.Getenv("TERRA_DRIFT_MCP_AUTH_TOKEN"); token != "" {
+			t.HTTPClient = &http.Client{Transport: bearerTransport{token: token, base: http.DefaultTransport}}
+		}
+		return t, nil
 	default:
 		return nil, fmt.Errorf("unknown mcp.transport %q", c.cfg.Transport)
 	}
+}
+
+type bearerTransport struct {
+	token string
+	base  http.RoundTripper
+}
+
+func (b bearerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Authorization", "Bearer "+b.token)
+	return b.base.RoundTrip(req)
 }
 
 func textContent(res *mcp.CallToolResult) string {

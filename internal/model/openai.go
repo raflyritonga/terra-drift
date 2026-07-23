@@ -35,7 +35,7 @@ func newOpenAICompatible(id, baseURL, apiKey string) (OpenAICompatible, error) {
 	}, nil
 }
 
-func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (string, error) {
+func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (string, int, error) {
 	reqBody, err := json.Marshal(map[string]any{
 		"model":       m.model,
 		"temperature": 0,
@@ -45,11 +45,11 @@ func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (st
 		},
 	})
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, m.endpoint, bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if m.apiKey != "" {
@@ -58,12 +58,12 @@ func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (st
 
 	resp, err := m.http.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("call model endpoint: %w", err)
+		return "", 0, fmt.Errorf("call model endpoint: %w", err)
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("model endpoint %s: %s", resp.Status, snippet(data))
+		return "", 0, fmt.Errorf("model endpoint %s: %s", resp.Status, snippet(data))
 	}
 
 	var out struct {
@@ -72,14 +72,17 @@ func (m OpenAICompatible) Complete(ctx context.Context, system, user string) (st
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &out); err != nil {
-		return "", fmt.Errorf("parse model response: %w", err)
+		return "", 0, fmt.Errorf("parse model response: %w", err)
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("model returned no choices")
+		return "", 0, fmt.Errorf("model returned no choices")
 	}
-	return out.Choices[0].Message.Content, nil
+	return out.Choices[0].Message.Content, out.Usage.TotalTokens, nil
 }
 
 func snippet(b []byte) string {

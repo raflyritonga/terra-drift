@@ -20,7 +20,7 @@ go build -o terra-drift     ./cmd/terra-drift    # the client (runs in CI)
 go build -o terra-drift-mcp ./cmd/terra-drift-mcp # the model server (its own box)
 ```
 
-Cut a release by pushing a tag (`git tag v0.1.0 && git push origin v0.1.0`) — CI builds every platform and publishes the archives.
+Cut a release by pushing a tag (`git tag v0.5.0 && git push origin v0.5.0`) — CI builds every platform and publishes the archives.
 
 ## Quick look
 
@@ -35,6 +35,8 @@ terra-drift sync  --dir envs/prod    # detect → report → ask which side to t
 - `--trust partial --live aws_x.y` — trust reality for named resources only
 
 For Bitbucket, the fix branch + commit are published via the REST API by default (`git.push_mode: api`) — no `git push`, so Atlassian API tokens work end to end. Set `push_mode: git` to use git transport instead.
+
+Since v0.5.0 (contract 2.0), model-proposed edits are **redacted** (no raw secrets/ARNs/IPs reach the LLM), **minimal** (only the drifted attributes may change — enforced on both client and server), **verified** (fmt + validate + a clean re-plan before anything is called fixed), and **deduped** (one open PR per drift set, updated in place). The server's HTTP endpoint requires a bearer token and enforces prompt-size/rate limits. See [CHANGELOG.md](CHANGELOG.md).
 
 In a terminal it prompts; in CI it prints the report and exits 2 until you pass `--trust`.
 

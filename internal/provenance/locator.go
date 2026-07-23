@@ -99,3 +99,39 @@ func (l *locator) parse(relPath string) *hclsyntax.Body {
 	body, _ := f.Body.(*hclsyntax.Body)
 	return body
 }
+
+// BlockSnippet returns just the source text of the block (or top-level
+// attribute) starting at line in file — the minimal context a model needs.
+func BlockSnippet(root, file string, line int) string {
+	abs := filepath.Join(root, file)
+	src, err := os.ReadFile(abs)
+	if err != nil {
+		return ""
+	}
+	f, _ := hclparse.NewParser().ParseHCL(src, file)
+	if f == nil {
+		return ""
+	}
+	body, ok := f.Body.(*hclsyntax.Body)
+	if !ok {
+		return ""
+	}
+	slice := func(from, to int) string {
+		lines := strings.Split(string(src), "\n")
+		if from < 1 || to > len(lines) || from > to {
+			return ""
+		}
+		return strings.Join(lines[from-1:to], "\n")
+	}
+	for _, b := range body.Blocks {
+		if b.DefRange().Start.Line == line {
+			return slice(b.Range().Start.Line, b.Range().End.Line)
+		}
+	}
+	for _, a := range body.Attributes {
+		if a.SrcRange.Start.Line == line {
+			return slice(a.SrcRange.Start.Line, a.Expr.Range().End.Line)
+		}
+	}
+	return ""
+}
