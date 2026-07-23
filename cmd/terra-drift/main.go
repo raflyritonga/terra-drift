@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-var version = "0.1.0-dev"
+var version = "0.5.0-dev"
 
 const usage = `terra-drift — turn clickops drift into a reviewed pull request
 

@@ -1,56 +1,115 @@
 // Package tool implements the MCP tool handlers.
 // It is the only bridge between the MCP surface and the model, and enforces
-// the contract: redaction, output validation, bounded retry.
+// the contract: redaction, size/rate limits, output validation, caching.
 package tool
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/raflyritonga/terra-drift/internal/contract"
 	"github.com/raflyritonga/terra-drift/internal/model"
 	"github.com/raflyritonga/terra-drift/internal/prompt"
 	"github.com/raflyritonga/terra-drift/internal/redact"
+	"github.com/raflyritonga/terra-drift/internal/serverconfig"
 )
 
-// Typed error codes the client can react to (fall back to report-only).
-const (
-	ErrGatewayDown      = "gateway-down"
-	ErrInvalidOutput    = "invalid-output"
-	ErrContractMismatch = "contract-mismatch"
-)
-
-// validateRetryMax bounds how often an invalid proposal is retried.
-const validateRetryMax = 1
+var reqID atomic.Int64
 
 type Handler struct {
-	Model model.Model
+	Model    model.Model
+	Limits   serverconfig.Limits
+	Provider string
+	ModelID  string
+	Cache    *Cache
+	Metrics  *Metrics
+	limiter  *limiter
+}
+
+// NewHandler wires the production handler; zero-value Handler{Model: m}
+// (used in tests) runs with no limits, cache, or metrics.
+func NewHandler(m model.Model, cfg serverconfig.Config) *Handler {
+	return &Handler{
+		Model:    m,
+		Limits:   cfg.Limits,
+		Provider: cfg.Model.Provider,
+		ModelID:  cfg.Model.ID,
+		Cache:    NewCache(time.Duration(cfg.Limits.CacheTTLMinutes) * time.Minute),
+		Metrics:  &Metrics{},
+		limiter:  newLimiter(cfg.Limits.RatePerMinute),
+	}
 }
 
 // ProposeHclEdits prompts the model and returns strictly-parsed, validated,
 // minimal structured edits. Live values are redacted before the model call.
 func (h *Handler) ProposeHclEdits(ctx context.Context, _ *mcp.CallToolRequest, in contract.ProposalInput) (*mcp.CallToolResult, contract.ProposalOutput, error) {
 	var out contract.ProposalOutput
-	if err := checkVersion(in.ContractVersion); err != nil {
+	id := reqID.Add(1)
+	start := time.Now()
+	logOutcome := func(outcome string, tokens int, cacheHit bool) {
+		if h.Metrics != nil {
+			h.Metrics.Tokens.Add(int64(tokens))
+			if outcome != "ok" {
+				h.Metrics.Errors.Add(1)
+			}
+			if cacheHit {
+				h.Metrics.CacheHits.Add(1)
+			}
+		}
+		slog.Info("propose_hcl_edits",
+			"request_id", id, "address", in.Drift.Address, "attribute", in.Drift.Attribute,
+			"outcome", outcome, "cache_hit", cacheHit, "tokens", tokens,
+			"latency_ms", time.Since(start).Milliseconds())
+	}
+	if h.Metrics != nil {
+		h.Metrics.Requests.Add(1)
+	}
+
+	if err := h.gate(in.ContractVersion); err != nil {
+		logOutcome(errCode(err), 0, false)
 		return nil, out, err
+	}
+
+	key := CacheKey(in, h.Provider, h.ModelID)
+	if h.Cache != nil {
+		if cached, ok := h.Cache.Get(key); ok {
+			logOutcome("ok", 0, true)
+			return nil, cached, nil
+		}
 	}
 
 	sys, payload, err := prompt.Build(in)
 	if err != nil {
+		logOutcome(ErrInvalidOutput, 0, false)
 		return nil, out, fmt.Errorf("%s: build prompt: %w", ErrInvalidOutput, err)
+	}
+	if h.Limits.MaxPromptBytes > 0 && len(payload) > h.Limits.MaxPromptBytes {
+		logOutcome(ErrBudgetExceeded, 0, false)
+		return nil, out, fmt.Errorf("%s: prompt is %d bytes (max %d)", ErrBudgetExceeded, len(payload), h.Limits.MaxPromptBytes)
+	}
+	if h.Limits.RequestTimeoutS > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(h.Limits.RequestTimeoutS)*time.Second)
+		defer cancel()
 	}
 
 	// S2: sensitive live values never reach the model.
 	red := redact.New()
 	sys, payload = red.Redact(sys), red.Redact(payload)
 
+	totalTokens := 0
 	var lastErr error
-	for attempt := 0; attempt <= validateRetryMax; attempt++ {
-		reply, _, err := h.Model.Complete(ctx, sys, payload)
+	for attempt := 0; attempt <= h.Limits.ValidateRetryMax; attempt++ {
+		reply, tokens, err := h.Model.Complete(ctx, sys, payload)
+		totalTokens += tokens
 		if err != nil {
+			logOutcome(ErrGatewayDown, totalTokens, false)
 			return nil, out, fmt.Errorf("%s: %w", ErrGatewayDown, err)
 		}
 		out, err = ParseStrict(red.Restore(reply))
@@ -58,18 +117,26 @@ func (h *Handler) ProposeHclEdits(ctx context.Context, _ *mcp.CallToolRequest, i
 			err = ValidateAllowed(out, in.AllowedAttrs)
 		}
 		if err == nil {
+			if h.Cache != nil {
+				h.Cache.Put(key, out)
+			}
+			logOutcome("ok", totalTokens, false)
 			return nil, out, nil
 		}
 		lastErr = err
 		payload += "\n\nYour previous reply was rejected: " + err.Error() + ". Reply again, correctly."
 	}
+	logOutcome(ErrInvalidOutput, totalTokens, false)
 	return nil, contract.ProposalOutput{}, fmt.Errorf("%s: %v", ErrInvalidOutput, lastErr)
 }
 
-// checkVersion refuses a contract-major mismatch before any model call.
-func checkVersion(clientVersion string) error {
+// gate applies the checks shared by both tools: contract version + rate limit.
+func (h *Handler) gate(clientVersion string) error {
 	if clientVersion != "" && major(clientVersion) != major(contract.Version) {
 		return fmt.Errorf("%s: client speaks contract %s, server speaks %s", ErrContractMismatch, clientVersion, contract.Version)
+	}
+	if h.limiter != nil && !h.limiter.allow() {
+		return fmt.Errorf("%s: more than %d requests in the last minute", ErrRateLimited, h.Limits.RatePerMinute)
 	}
 	return nil
 }
@@ -81,6 +148,14 @@ func major(v string) string {
 	return v
 }
 
+func errCode(err error) string {
+	s := err.Error()
+	if i := strings.Index(s, ":"); i > 0 {
+		return s[:i]
+	}
+	return "error"
+}
+
 // ExplainDrift is the read path: the model describes the drift and its risk.
 // Plain-text reply, length-capped; it never proposes or applies edits.
 func (h *Handler) ExplainDrift(ctx context.Context, _ *mcp.CallToolRequest, in contract.ExplainInput) (*mcp.CallToolResult, contract.ExplainOutput, error) {
@@ -88,16 +163,30 @@ func (h *Handler) ExplainDrift(ctx context.Context, _ *mcp.CallToolRequest, in c
 	if len(in.Drifts) == 0 {
 		return nil, out, fmt.Errorf("no drifts to explain")
 	}
+	if err := h.gate(""); err != nil {
+		return nil, out, err
+	}
 
 	sys, payload, err := prompt.BuildExplain(in)
 	if err != nil {
 		return nil, out, fmt.Errorf("build prompt: %w", err)
 	}
+	if h.Limits.MaxPromptBytes > 0 && len(payload) > h.Limits.MaxPromptBytes {
+		return nil, out, fmt.Errorf("%s: prompt is %d bytes (max %d)", ErrBudgetExceeded, len(payload), h.Limits.MaxPromptBytes)
+	}
+	if h.Limits.RequestTimeoutS > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(h.Limits.RequestTimeoutS)*time.Second)
+		defer cancel()
+	}
 
 	red := redact.New()
-	reply, _, err := h.Model.Complete(ctx, red.Redact(sys), red.Redact(payload))
+	reply, tokens, err := h.Model.Complete(ctx, red.Redact(sys), red.Redact(payload))
 	if err != nil {
 		return nil, out, fmt.Errorf("%s: %w", ErrGatewayDown, err)
+	}
+	if h.Metrics != nil {
+		h.Metrics.Tokens.Add(int64(tokens))
 	}
 
 	reply = strings.TrimSpace(red.Restore(reply))

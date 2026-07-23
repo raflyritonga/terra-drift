@@ -116,8 +116,8 @@ go build -o terra-drift-mcp ./cmd/terra-drift-mcp</code></pre>
 
 <h3>Cutting a release (maintainers)</h3>
 <p>Pushing a version tag builds all platforms and publishes a GitHub Release automatically (<code>.github/workflows/release.yml</code>).</p>
-<pre><code>git tag v0.1.0
-git push origin v0.1.0</code></pre>
+<pre><code>git tag v0.5.0
+git push origin v0.5.0</code></pre>
 
 <h2 id="architecture">Architecture</h2>
 <table>
@@ -207,7 +207,7 @@ TERRA_DRIFT_MCP_SECRET_REF=prod/terra-drift/llm-key
   -v $HOME/.aws:/home/nonroot/.aws:ro \
   terra-drift-mcp</code></pre>
 
-<div class="warn"><strong>Lock down the port.</strong> There is no built-in auth yet. Allow the listen port only from your CI runner IPs (security group / firewall), and put TLS in front if the traffic crosses an untrusted network.</div>
+<div class="warn"><strong>Auth is required on HTTP.</strong> The server refuses to start over HTTP without <code>TERRA_DRIFT_MCP_AUTH_TOKEN</code>; the client sends it as a bearer from the same env var. Still restrict the listen port to your CI runner IPs and put TLS in front if the traffic crosses an untrusted network. <code>/healthz</code>, <code>/readyz</code>, and <code>/metrics</code> are unauthenticated.</div>
 
 <h2 id="client">Host the client</h2>
 <p><code>terra-drift</code> runs wherever your <code>terraform plan</code> runs — a CI runner, usually. It needs:</p>
