@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.37
-	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.44.0
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.44.6
 	github.com/google/jsonschema-go v0.4.3
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
